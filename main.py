@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ======================================
-# VALIDACIÓN DE VARIABLES DE ENTORNO
+# VALIDACIÓN DE VARIABLES DE ENTORNO (CORREGIDA)
 # ======================================
 def validar_variables():
     try:
@@ -33,11 +33,11 @@ def validar_variables():
         if not TOKEN or ":" not in TOKEN:
             raise ValueError("Formato de token inválido")
 
-        # Group ID
+        # Group ID (Corrección crítica)
         global GRUPO_ID
         grupo_id_raw = os.environ["GROUP_ID"].strip()
         grupo_id_limpio = re.sub(r"[^-\d]", "", grupo_id_raw)
-        GRUPO_ID = int(grupo_id_limpio.split("=")[-1] if "=" in grupo_id_limpio else int(grupo_id_limpio)
+        GRUPO_ID = int(grupo_id_limpio.split("=")[-1]) if "=" in grupo_id_limpio else int(grupo_id_limpio)
         
         if not (-1009999999999 < GRUPO_ID < -1000000000000):
             raise ValueError("ID de grupo inválido")
@@ -74,12 +74,12 @@ def health_check():
     return "🟢 Bot operativo", 200
 
 # ======================================
-# HANDLERS DE TELEGRAM (CORREGIDOS)
+# HANDLERS DE TELEGRAM (ERROR DE SINTAXIS CORREGIDO)
 # ======================================
 PERMISOS = {
     "hospitalizacion": {
         "nombre": "🏥 Hospitalización/Reposo",
-        "info": """📋 **Hospitalización/Intervención/Reposo:**
+        "info": """📋 **Hospitalización/Intervención/Reposo:
 - Duración: 2 días naturales
 - Documentación: Certificado médico"""
     }
@@ -110,13 +110,13 @@ async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Volver al inicio", callback_data="menu_inicio")]
-            )
+            ])  # Paréntesis corregido aquí
         )
     except Exception as e:
         logger.error(f"Error manejando permisos: {str(e)}")
 
 # ======================================
-# CONFIGURACIÓN DEL BOT (CORREGIDA)
+# CONFIGURACIÓN DEL BOT (ACTUALIZADA)
 # ======================================
 def iniciar_bot():
     application = Application.builder().token(TOKEN).build()
@@ -129,11 +129,11 @@ def iniciar_bot():
     application.run_polling()
 
 # ======================================
-# EJECUCIÓN PRINCIPAL (ACTUALIZADA)
+# EJECUCIÓN PRINCIPAL (ESTABLE)
 # ======================================
 if __name__ == "__main__":
     try:
-        # Iniciar bot en un hilo con su propio event loop
+        # Iniciar bot en hilo separado
         bot_thread = Thread(target=iniciar_bot, daemon=True)
         bot_thread.start()
         logger.info("🤖 Bot de Telegram iniciado correctamente")
