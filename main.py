@@ -65,7 +65,7 @@ if not validar_variables():
     exit(1)
 
 # ======================================
-# CONFIGURACIÓN DE FLASK (EN HILO SEPARADO)
+# CONFIGURACIÓN DE FLASK
 # ======================================
 app = Flask(__name__)
 
@@ -73,11 +73,8 @@ app = Flask(__name__)
 def health_check():
     return "🟢 Bot operativo", 200
 
-def ejecutar_flask():
-    app.run(host='0.0.0.0', port=8080, use_reloader=False)
-
 # ======================================
-# HANDLERS DE TELEGRAM (CORREGIDOS)
+# HANDLERS DE TELEGRAM
 # ======================================
 PERMISOS = {
     "hospitalizacion": {
@@ -113,22 +110,20 @@ async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Volver al inicio", callback_data="menu_inicio")]
-            ])
+            )
         )
     except Exception as e:
         logger.error(f"Error manejando permisos: {str(e)}")
 
 # ======================================
-# CONFIGURACIÓN DEL BOT (SOLUCIÓN DEFINITIVA)
+# CONFIGURACIÓN DEL BOT
 # ======================================
 async def main():
     application = Application.builder().token(TOKEN).build()
     
-    # Registro de handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(manejar_permisos, pattern="^menu_"))
     
-    # Inicialización manual para evitar conflictos de hilos
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
@@ -138,18 +133,37 @@ async def main():
         await asyncio.sleep(3600)
 
 # ======================================
-# EJECUCIÓN PRINCIPAL (ESTRUCTURA CORRECTA)
+# EJECUCIÓN PRINCIPAL (PRODUCCIÓN)
 # ======================================
 if __name__ == "__main__":
-    # Iniciar Flask en hilo separado
-    flask_thread = Thread(target=ejecutar_flask, daemon=True)
-    flask_thread.start()
-    
-    # Iniciar bot de Telegram en el hilo principal con asyncio
-    try:
+    if os.environ.get("RAILWAY_ENVIRONMENT") == "production":
+        from gunicorn.app.base import BaseApplication
+
+        class GunicornApp(BaseApplication):
+            def __init__(self, app, options=None):
+                self.application = app
+                self.options = options or {}
+                super().__init__()
+
+            def load_config(self):
+                for key, value in self.options.items():
+                    self.cfg.set(key, value)
+
+            def load(self):
+                return self.application
+
+        # Iniciar bot en segundo plano
+        bot_thread = Thread(target=lambda: asyncio.run(main()), daemon=True)
+        bot_thread.start()
+
+        # Configurar Gunicorn
+        options = {
+            'bind': '0.0.0.0:8080',
+            'workers': 4,
+            'timeout': 120
+        }
+        GunicornApp(app, options).run()
+        
+    else:  # Entorno de desarrollo
+        app.run(host='0.0.0.0', port=8080, use_reloader=False)
         asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Apagando bot...")
-    except Exception as e:
-        logger.critical(f"Error crítico: {str(e)}")
-        exit(1)
