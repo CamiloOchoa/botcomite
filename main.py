@@ -15,9 +15,13 @@ from telegram.ext import (
 )
 
 # Configuración desde variables de entorno
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-GRUPO_ID = int(os.getenv("GROUP_ID"))
-TEMA_ID = int(os.getenv("TOPIC_ID"))
+TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+GRUPO_ID_STR = os.getenv("GROUP_ID", "").strip()
+GRUPO_ID = os.getenv("GROUP_ID", "").strip()  # Elimina espacios/tabs
+if not GRUPO_ID.startswith("-100") or not GRUPO_ID[1:].isdigit():
+    raise ValueError("ID de grupo inválido. Debe ser tipo -1001234567890")
+GRUPO_ID = int(GRUPO_ID)
+TEMA_ID = int(os.getenv("TOPIC_ID", "0"))
 BOT_USERNAME = os.getenv("BOT_USERNAME")
 GROUP_LINK = os.getenv("GROUP_LINK")
 URL_TEMA = f"https://t.me/c/{str(GRUPO_ID)[4:]}/{TEMA_ID}" if GRUPO_ID else ""
