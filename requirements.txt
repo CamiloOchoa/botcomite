@@ -1,4 +1,5 @@
-python-telegram-bot==20.3
-Flask==3.0.0
-telegram
-httpx
+python-telegram-bot==20.5
+Flask==3.0.2
+httpx==0.26.0
+python-dotenv==1.0.0
+gunicorn==21.2.0
