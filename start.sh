@@ -1,4 +1,5 @@
 #!/bin/bash
+chmod +x start.sh
 # Iniciar bot de Telegram en segundo plano
 python3 -m main &
 # Iniciar Gunicorn para Flask
