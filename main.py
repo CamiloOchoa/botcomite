@@ -1,19 +1,19 @@
 from flask import Flask
-from threading import Thread
 import logging
 import os
-import httpx
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMember
+import re
+import asyncio
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     ContextTypes,
-    CallbackQueryHandler,
-    ChatMemberHandler
+    CallbackQueryHandler
 )
+from threading import Thread
 
 # ======================================
-# CONFIGURACIÓN INICIAL Y VALIDACIONES
+# CONFIGURACIÓN INICIAL
 # ======================================
 logging.basicConfig(
     level=logging.INFO,
@@ -22,28 +22,47 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-try:
-    # Validar y cargar variables de entorno
-    TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
-    GRUPO_ID = int(os.environ["GROUP_ID"].strip())
-    TEMA_ID = int(os.environ.get("TOPIC_ID", "1"))
-    BOT_USERNAME = os.environ["BOT_USERNAME"].strip().lstrip('@')
-    GROUP_LINK = os.environ["GROUP_LINK"].strip()
-    
-    # Validaciones adicionales
-    if ":" not in TOKEN:
-        raise ValueError("Formato de token inválido")
-    if GRUPO_ID >= 0:
-        raise ValueError("GROUP_ID debe ser negativo")
-    if not GROUP_LINK.startswith("https://t.me/"):
-        raise ValueError("Enlace de grupo inválido")
+# ======================================
+# VALIDACIÓN DE VARIABLES DE ENTORNO
+# ======================================
+def validar_variables():
+    try:
+        # Telegram Token
+        global TOKEN
+        TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
+        if not TOKEN or ":" not in TOKEN:
+            raise ValueError("Formato de token inválido")
 
-except (KeyError, ValueError) as e:
-    logger.critical(f"❌ Error de configuración: {str(e)}")
+        # Group ID
+        global GRUPO_ID
+        grupo_id_raw = os.environ["GROUP_ID"].strip()
+        grupo_id_limpio = re.sub(r"[^-\d]", "", grupo_id_raw)
+        GRUPO_ID = int(grupo_id_limpio.split("=")[-1] if "=" in grupo_id_limpio else int(grupo_id_limpio)
+        
+        if not (-1009999999999 < GRUPO_ID < -1000000000000):
+            raise ValueError("ID de grupo inválido")
+
+        # Bot Username
+        global BOT_USERNAME
+        BOT_USERNAME = os.environ["BOT_USERNAME"].strip().lstrip('@')
+        if not BOT_USERNAME:
+            raise ValueError("BOT_USERNAME vacío")
+
+        # Group Link
+        global GROUP_LINK
+        GROUP_LINK = os.environ["GROUP_LINK"].strip()
+        if not GROUP_LINK.startswith("https://t.me/"):
+            raise ValueError("Enlace de grupo inválido")
+
+        logger.info("✅ Variables validadas correctamente")
+        return True
+
+    except Exception as e:
+        logger.critical(f"❌ Error de configuración: {str(e)}")
+        return False
+
+if not validar_variables():
     exit(1)
-
-# Configuración derivada
-URL_TEMA = f"https://t.me/c/{str(abs(GRUPO_ID))[3:]}/{TEMA_ID}"
 
 # ======================================
 # CONFIGURACIÓN DE FLASK
@@ -66,67 +85,58 @@ PERMISOS = {
     }
 }
 
-async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         teclado = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Iniciar chat", url=f"https://t.me/{BOT_USERNAME}?start")],
-            [InlineKeyboardButton("📲 Menú privado", url=f"https://t.me/{BOT_USERNAME}?start=menu")]
+            [InlineKeyboardButton("Ver permisos", callback_data="menu_permisos")],
+            [InlineKeyboardButton("Unirse al grupo", url=GROUP_LINK)]
         ])
         
-        await context.bot.send_message(
-            chat_id=GRUPO_ID,
-            message_thread_id=TEMA_ID,
-            text="¡Bienvenido! Selecciona una opción:",
+        await update.message.reply_text(
+            "¡Bienvenido al bot del Comité! Elige una opción:",
             reply_markup=teclado
         )
     except Exception as e:
-        logger.error(f"Error en menú principal: {str(e)}")
+        logger.error(f"Error en comando start: {str(e)}")
 
 async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
     try:
-        permiso = PERMISOS.get("hospitalizacion")
-        if permiso:
-            await query.edit_message_text(
-                text=f"**{permiso['nombre']}**\n\n{permiso['info']}",
-                parse_mode="Markdown"
+        permiso = PERMISOS["hospitalizacion"]
+        await query.edit_message_text(
+            text=f"**{permiso['nombre']}**\n\n{permiso['info']}",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("Volver al inicio", callback_data="menu_inicio")]
             )
-            
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text="¿Necesitas más información?",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📚 Ver más permisos", callback_data="menu_permisos")],
-                    [InlineKeyboardButton("🏠 Menú principal", callback_data="menu_principal")]
-                ])  # Paréntesis corregido aquí
-            )
+        )
     except Exception as e:
         logger.error(f"Error manejando permisos: {str(e)}")
 
 # ======================================
-# CONFIGURACIÓN DEL BOT
+# CONFIGURACIÓN DEL BOT (CORREGIDA)
 # ======================================
-def configurar_bot():
+def iniciar_bot():
     application = Application.builder().token(TOKEN).build()
     
-    # Handlers
-    application.add_handler(CommandHandler("inicio", enviar_menu_principal))
-    application.add_handler(CallbackQueryHandler(manejar_permisos, pattern="^perm_"))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(manejar_permisos, pattern="^menu_"))
     
-    return application
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    application.run_polling()
 
 # ======================================
-# EJECUCIÓN PRINCIPAL
+# EJECUCIÓN PRINCIPAL (ACTUALIZADA)
 # ======================================
 if __name__ == "__main__":
     try:
-        # Iniciar bot
-        bot_app = configurar_bot()
-        bot_thread = Thread(target=bot_app.run_polling, daemon=True)
+        # Iniciar bot en un hilo con su propio event loop
+        bot_thread = Thread(target=iniciar_bot, daemon=True)
         bot_thread.start()
-        logger.info("🤖 Bot iniciado correctamente")
+        logger.info("🤖 Bot de Telegram iniciado correctamente")
         
         # Iniciar servidor web
         if os.environ.get("RAILWAY_ENVIRONMENT") == "production":
