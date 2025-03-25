@@ -23,7 +23,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ======================================
-# VALIDACIÓN DE VARIABLES DE ENTORNO (CORREGIDA)
+# VALIDACIÓN DE VARIABLES DE ENTORNO
 # ======================================
 def validar_variables():
     try:
@@ -33,7 +33,7 @@ def validar_variables():
         if not TOKEN or ":" not in TOKEN:
             raise ValueError("Formato de token inválido")
 
-        # Group ID (Corrección crítica)
+        # Group ID
         global GRUPO_ID
         grupo_id_raw = os.environ["GROUP_ID"].strip()
         grupo_id_limpio = re.sub(r"[^-\d]", "", grupo_id_raw)
@@ -65,7 +65,7 @@ if not validar_variables():
     exit(1)
 
 # ======================================
-# CONFIGURACIÓN DE FLASK
+# CONFIGURACIÓN DE FLASK (EN HILO SEPARADO)
 # ======================================
 app = Flask(__name__)
 
@@ -73,8 +73,11 @@ app = Flask(__name__)
 def health_check():
     return "🟢 Bot operativo", 200
 
+def ejecutar_flask():
+    app.run(host='0.0.0.0', port=8080, use_reloader=False)
+
 # ======================================
-# HANDLERS DE TELEGRAM (ERROR DE SINTAXIS CORREGIDO)
+# HANDLERS DE TELEGRAM (CORREGIDOS)
 # ======================================
 PERMISOS = {
     "hospitalizacion": {
@@ -110,55 +113,43 @@ async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Volver al inicio", callback_data="menu_inicio")]
-            ])  # Paréntesis corregido aquí
+            ])
         )
     except Exception as e:
         logger.error(f"Error manejando permisos: {str(e)}")
 
 # ======================================
-# CONFIGURACIÓN DEL BOT (ACTUALIZADA)
+# CONFIGURACIÓN DEL BOT (SOLUCIÓN DEFINITIVA)
 # ======================================
-def iniciar_bot():
+async def main():
     application = Application.builder().token(TOKEN).build()
     
+    # Registro de handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(manejar_permisos, pattern="^menu_"))
     
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    application.run_polling()
+    # Inicialización manual para evitar conflictos de hilos
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    
+    # Mantener el bot activo
+    while True:
+        await asyncio.sleep(3600)
 
 # ======================================
-# EJECUCIÓN PRINCIPAL (ESTABLE)
+# EJECUCIÓN PRINCIPAL (ESTRUCTURA CORRECTA)
 # ======================================
 if __name__ == "__main__":
+    # Iniciar Flask en hilo separado
+    flask_thread = Thread(target=ejecutar_flask, daemon=True)
+    flask_thread.start()
+    
+    # Iniciar bot de Telegram en el hilo principal con asyncio
     try:
-        # Iniciar bot en hilo separado
-        bot_thread = Thread(target=iniciar_bot, daemon=True)
-        bot_thread.start()
-        logger.info("🤖 Bot de Telegram iniciado correctamente")
-        
-        # Iniciar servidor web
-        if os.environ.get("RAILWAY_ENVIRONMENT") == "production":
-            from gunicorn.app.base import BaseApplication
-            
-            class GunicornApp(BaseApplication):
-                def __init__(self, app, options=None):
-                    self.application = app
-                    self.options = options or {}
-                    super().__init__()
-                
-                def load_config(self):
-                    for key, value in self.options.items():
-                        self.cfg.set(key, value)
-                
-                def load(self):
-                    return self.application
-            
-            GunicornApp(app, {'bind': '0.0.0.0:8080', 'workers': 2}).run()
-        else:
-            app.run(host='0.0.0.0', port=8080)
-            
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Apagando bot...")
     except Exception as e:
         logger.critical(f"Error crítico: {str(e)}")
         exit(1)
