@@ -31,7 +31,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 PERMISOS = {
-    # ... (mantén igual tu diccionario PERMISOS)
+    "hospitalizacion": {
+        "nombre": "🏥 Hospitalización/Reposo",
+        "info": """📋 **Hospitalización/Intervención/Reposo:**
+- Duración: 2 días naturales
+- Documentación: Certificado médico"""
+    },
+    # ... (mantener el resto de permisos igual)
 }
 
 app = Flask(__name__)
@@ -40,48 +46,98 @@ app = Flask(__name__)
 def home():
     return "🤖 Bot activo y funcionando!"
 
-# ======================
-# HANDLERS DE TELEGRAM (iguales a tu versión)
-# ======================
-
+# -------------------------------------------------------------------
 async def enviar_mensaje_opciones(chat_id: int, excluir: str, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
+    botones = []
+    if excluir != "menu_permisos":
+        botones.append(InlineKeyboardButton("Permisos", callback_data="menu_permisos"))
+    if excluir != "menu_bolsa":
+        botones.append(InlineKeyboardButton("Bolsa de horas", callback_data="menu_bolsa"))
+    if excluir != "menu_excedencias":
+        botones.append(InlineKeyboardButton("Excedencias", callback_data="menu_excedencias"))
+    botones.append(InlineKeyboardButton("Volver al menú principal", callback_data="menu_private"))
+    teclado = InlineKeyboardMarkup([botones])
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="Espero que te haya sido de utilidad, ¿Quieres información sobre otro tema?",
+        reply_markup=teclado
+    )
 
+# -------------------------------------------------------------------
 async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
+    try:
+        teclado = InlineKeyboardMarkup([
+            [InlineKeyboardButton("💬 Iniciar conversación", url=f"https://t.me/{BOT_USERNAME}?start")],
+            [InlineKeyboardButton("Menú privado", url=f"https://t.me/{BOT_USERNAME}?start=menu")]
+        ])
+        mensaje_texto = "Si es la primera vez, inicia un chat privado con nosotros:"
+        
+        if context.bot_data.get("mensaje_tema"):
+            mensaje_id = context.bot_data["mensaje_tema"]
+            await context.bot.edit_message_text(
+                chat_id=GRUPO_ID,
+                message_id=mensaje_id,
+                text=mensaje_texto,
+                reply_markup=teclado,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+        else:
+            mensaje = await context.bot.send_message(
+                chat_id=GRUPO_ID,
+                message_thread_id=TEMA_ID,
+                text=mensaje_texto,
+                reply_markup=teclado,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+            context.bot_data["mensaje_tema"] = mensaje.message_id
+            
+    except Exception as e:
+        logger.error(f"Error al enviar/editar el menú principal: {e}", exc_info=True)
+        try:
+            await context.bot.send_message(
+                chat_id=GRUPO_ID,
+                message_thread_id=TEMA_ID,
+                text="⚠️ Hubo un problema al mostrar el menú. Por favor, usa /inicio de nuevo."
+            )
+        except Exception as e2:
+            logger.error(f"Error al enviar mensaje de error al grupo: {e2}", exc_info=True)
+
+# -------------------------------------------------------------------
+# Resto de handlers con indentación corregida
+# -------------------------------------------------------------------
 
 async def inicio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
+    texto = ("Si es la primera vez que entras presiona el botón Registro, "
+             "si ya lo has hecho antes presiona el botón Inicio.")
+    teclado = InlineKeyboardMarkup([
+        [InlineKeyboardButton("Registro", callback_data="registro_click"),
+         InlineKeyboardButton("Inicio", callback_data="inicio_click")]
+    ])
+    try:
+        await context.bot.send_message(
+            chat_id=GRUPO_ID,
+            message_thread_id=TEMA_ID,
+            text=texto,
+            reply_markup=teclado,
+            parse_mode="Markdown"
+        )
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="El mensaje de inicio ha sido publicado en el tema 'informacion' del grupo."
+        )
+    except Exception as e:
+        logger.error(f"Error al enviar el comando /inicio: {e}", exc_info=True)
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⚠️ Hubo un problema al enviar el mensaje. Inténtalo de nuevo."
+        )
 
-async def registro_click_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def inicio_click_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def volver_inicio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def documentacion(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def manejar_menu_privado(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def manejar_botones(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def manejar_miembros_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    # ... (mantén tu implementación)
+# ... (continuar con el resto de handlers manteniendo la indentación)
 
 # ======================
-# CONFIGURACIÓN DEL BOT
+# CONFIGURACIÓN FINAL
 # ======================
 
 def configurar_handlers(application):
@@ -106,12 +162,7 @@ def run_bot():
     except Exception as e:
         logger.critical(f"Error crítico: {str(e)}", exc_info=True)
 
-# ======================
-# EJECUCIÓN PRINCIPAL
-# ======================
-
 if __name__ == "__main__":
-    # Configuración para producción
     if os.getenv("ENV") == "production":
         from gunicorn.app.base import BaseApplication
 
@@ -128,19 +179,15 @@ if __name__ == "__main__":
             def load(self):
                 return self.application
 
-        # Iniciar bot en segundo plano
         bot_thread = Thread(target=run_bot, daemon=True)
         bot_thread.start()
 
-        # Configurar y ejecutar Gunicorn
         options = {
             'bind': '0.0.0.0:8080',
             'workers': 4,
             'timeout': 120
         }
         FlaskApp(app, options).run()
-
     else:
-        # Entorno de desarrollo
         Thread(target=run_bot, daemon=True).start()
         app.run(host='0.0.0.0', port=8080, debug=False)
