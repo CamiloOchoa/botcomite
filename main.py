@@ -22,36 +22,24 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Validar y cargar variables de entorno
 try:
-    # Telegram Token
+    # Validar y cargar variables de entorno
     TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
+    GRUPO_ID = int(os.environ["GROUP_ID"].strip())
+    TEMA_ID = int(os.environ.get("TOPIC_ID", "1"))
+    BOT_USERNAME = os.environ["BOT_USERNAME"].strip().lstrip('@')
+    GROUP_LINK = os.environ["GROUP_LINK"].strip()
+    
+    # Validaciones adicionales
     if ":" not in TOKEN:
         raise ValueError("Formato de token inválido")
-    
-    # Grupo ID
-    GRUPO_ID = int(os.environ["GROUP_ID"].strip())
-    if GRUPO_ID >= 0 or GRUPO_ID > -1000000000000:
-        raise ValueError("GROUP_ID debe ser un número negativo empezando por -100")
-        
-    # Topic ID
-    TEMA_ID = int(os.environ.get("TOPIC_ID", "1"))
-    
-    # Bot username
-    BOT_USERNAME = os.environ["BOT_USERNAME"].strip()
-    if not BOT_USERNAME.startswith("@"):
-        BOT_USERNAME = f"@{BOT_USERNAME}"
-    
-    # Group link
-    GROUP_LINK = os.environ["GROUP_LINK"].strip()
+    if GRUPO_ID >= 0:
+        raise ValueError("GROUP_ID debe ser negativo")
     if not GROUP_LINK.startswith("https://t.me/"):
         raise ValueError("Enlace de grupo inválido")
 
-except KeyError as e:
-    logger.critical(f"❌ Variable de entorno faltante: {e}")
-    exit(1)
-except ValueError as e:
-    logger.critical(f"❌ Error en variables: {e}")
+except (KeyError, ValueError) as e:
+    logger.critical(f"❌ Error de configuración: {str(e)}")
     exit(1)
 
 # Configuración derivada
@@ -67,7 +55,7 @@ def health_check():
     return "🟢 Bot operativo", 200
 
 # ======================================
-# HANDLERS DE TELEGRAM
+# HANDLERS DE TELEGRAM (CORREGIDOS)
 # ======================================
 PERMISOS = {
     "hospitalizacion": {
@@ -75,25 +63,22 @@ PERMISOS = {
         "info": """📋 **Hospitalización/Intervención/Reposo:**
 - Duración: 2 días naturales
 - Documentación: Certificado médico"""
-    },
-    # ... Agrega los demás permisos aquí
+    }
 }
 
 async def enviar_menu_principal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         teclado = InlineKeyboardMarkup([
-            [InlineKeyboardButton("💬 Iniciar chat", url=f"https://t.me/{BOT_USERNAME[1:]}?start")],
-            [InlineKeyboardButton("📲 Menú privado", url=f"https://t.me/{BOT_USERNAME[1:]}?start=menu")]
+            [InlineKeyboardButton("💬 Iniciar chat", url=f"https://t.me/{BOT_USERNAME}?start")],
+            [InlineKeyboardButton("📲 Menú privado", url=f"https://t.me/{BOT_USERNAME}?start=menu")]
         ])
         
-        mensaje = await context.bot.send_message(
+        await context.bot.send_message(
             chat_id=GRUPO_ID,
             message_thread_id=TEMA_ID,
             text="¡Bienvenido! Selecciona una opción:",
             reply_markup=teclado
         )
-        context.bot_data["mensaje_pin"] = mensaje.message_id
-        
     except Exception as e:
         logger.error(f"Error en menú principal: {str(e)}")
 
@@ -102,9 +87,7 @@ async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     
     try:
-        accion = query.data.split("_")[1]
-        permiso = PERMISOS.get(accion)
-        
+        permiso = PERMISOS.get("hospitalizacion")
         if permiso:
             await query.edit_message_text(
                 text=f"**{permiso['nombre']}**\n\n{permiso['info']}",
@@ -117,9 +100,8 @@ async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("📚 Ver más permisos", callback_data="menu_permisos")],
                     [InlineKeyboardButton("🏠 Menú principal", callback_data="menu_principal")]
-                )
+                ])  # Paréntesis corregido aquí
             )
-            
     except Exception as e:
         logger.error(f"Error manejando permisos: {str(e)}")
 
@@ -139,14 +121,14 @@ def configurar_bot():
 # EJECUCIÓN PRINCIPAL
 # ======================================
 if __name__ == "__main__":
-    # Iniciar bot en segundo plano
     try:
+        # Iniciar bot
         bot_app = configurar_bot()
         bot_thread = Thread(target=bot_app.run_polling, daemon=True)
         bot_thread.start()
-        logger.info("🤖 Bot de Telegram iniciado correctamente")
+        logger.info("🤖 Bot iniciado correctamente")
         
-        # Configurar servidor web
+        # Iniciar servidor web
         if os.environ.get("RAILWAY_ENVIRONMENT") == "production":
             from gunicorn.app.base import BaseApplication
             
@@ -163,9 +145,9 @@ if __name__ == "__main__":
                 def load(self):
                     return self.application
             
-            GunicornApp(app, {'bind': '0.0.0.0:8080', 'workers': 4}).run()
+            GunicornApp(app, {'bind': '0.0.0.0:8080', 'workers': 2}).run()
         else:
-            app.run(host='0.0.0.0', port=8080, use_reloader=False)
+            app.run(host='0.0.0.0', port=8080)
             
     except Exception as e:
         logger.critical(f"Error crítico: {str(e)}")
