@@ -74,7 +74,7 @@ def health_check():
     return "🟢 Bot operativo", 200
 
 # ======================================
-# HANDLERS DE TELEGRAM
+# HANDLERS DE TELEGRAM (CORREGIDOS)
 # ======================================
 PERMISOS = {
     "hospitalizacion": {
@@ -110,7 +110,7 @@ async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("Volver al inicio", callback_data="menu_inicio")]
-            )
+            ])  # ¡CORRECCIÓN AQUÍ! Se añadió el bracket faltante
         )
     except Exception as e:
         logger.error(f"Error manejando permisos: {str(e)}")
@@ -133,7 +133,7 @@ async def main():
         await asyncio.sleep(3600)
 
 # ======================================
-# EJECUCIÓN PRINCIPAL (PRODUCCIÓN)
+# EJECUCIÓN PRINCIPAL
 # ======================================
 if __name__ == "__main__":
     if os.environ.get("RAILWAY_ENVIRONMENT") == "production":
@@ -152,11 +152,7 @@ if __name__ == "__main__":
             def load(self):
                 return self.application
 
-        # Iniciar bot en segundo plano
-        bot_thread = Thread(target=lambda: asyncio.run(main()), daemon=True)
-        bot_thread.start()
-
-        # Configurar Gunicorn
+        # Configuración de Gunicorn
         options = {
             'bind': '0.0.0.0:8080',
             'workers': 4,
