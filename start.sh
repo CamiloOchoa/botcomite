@@ -1,4 +1,3 @@
-chmod +x start.sh
 #!/bin/bash
 # Iniciar bot de Telegram en segundo plano
 python3 -m main &
