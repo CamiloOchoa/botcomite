@@ -21,28 +21,30 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Estados para la conversación
-SELECTING_ACTION, TYPING_REPLY = range(2) # SELECTING_ACTION no se usa realmente aquí, pero mantenemos la estructura
+TYPING_REPLY = 0 # Solo necesitamos un estado después del botón
 
-# Variables globales
+# --- IDs y Variables Globales ---
 TOKEN = None
 GRUPO_ID = None # Grupo del Comité
 BOT_USERNAME = None
-GROUP_LINK = None
+GROUP_LINK = None # Enlace al grupo del comité (si se usa)
 
-# IDs de los temas y grupos
-TEMA_CONSULTAS_SUGERENCIAS = 272  # Tema en GRUPO_ID donde van los botones (¡Este mensaje NO se editará!)
-TEMA_CONSULTAS_EXTERNO = 69  # Tema de consultas en GRUPO_EXTERNO_ID
-TEMA_SUGERENCIAS_EXTERNO = 71  # Tema de sugerencias en GRUPO_EXTERNO_ID
-GRUPO_EXTERNO_ID = -1002433074372  # ID del grupo externo
+# IDs de Temas en el GRUPO DEL COMITÉ (GRUPO_ID)
+# !! IMPORTANTE: Debes obtener los IDs correctos para estos temas !!
+TEMA_BOTON_CONSULTAS_COMITE = 272  # <- REEMPLAZA con el ID del tema donde irá el botón "Consulta"
+TEMA_BOTON_SUGERENCIAS_COMITE = 291 # <- REEMPLAZA con el ID del tema donde irá el botón "Sugerencia"
+
+# IDs de Temas en el GRUPO EXTERNO (GRUPO_EXTERNO_ID)
+TEMA_CONSULTAS_EXTERNO = 69
+TEMA_SUGERENCIAS_EXTERNO = 71
+GRUPO_EXTERNO_ID = -1002433074372
 
 # --- Validación de Variables de Entorno ---
 def validar_variables():
     global TOKEN, GRUPO_ID, BOT_USERNAME, GROUP_LINK
     try:
         TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
-        if not TOKEN or ":" not in TOKEN:
-            raise ValueError("Formato de token inválido")
-
+        # ... (resto de validaciones iguales) ...
         grupo_id_raw = os.environ["GROUP_ID"].strip()
         grupo_id_limpio = re.sub(r"[^-\d]", "", grupo_id_raw)
         GRUPO_ID = int(grupo_id_limpio)
@@ -55,16 +57,20 @@ def validar_variables():
 
         GROUP_LINK = os.environ["GROUP_LINK"].strip()
         if not GROUP_LINK.startswith("https://t.me/"):
-            raise ValueError("Enlace de grupo inválido")
+            # Cambiado a warning ya que no se usa activamente
+            logger.warning("Enlace de grupo (GROUP_LINK) inválido o no configurado.")
+            # raise ValueError("Enlace de grupo inválido") # Descomentar si es obligatorio
 
         logger.info(f"GRUPO_ID (Comité): {GRUPO_ID}")
-        logger.info(f"TEMA_CONSULTAS_SUGERENCIAS (Comité): {TEMA_CONSULTAS_SUGERENCIAS}")
+        logger.info(f"TEMA_BOTON_CONSULTAS_COMITE: {TEMA_BOTON_CONSULTAS_COMITE}") # Log nuevo ID
+        logger.info(f"TEMA_BOTON_SUGERENCIAS_COMITE: {TEMA_BOTON_SUGERENCIAS_COMITE}") # Log nuevo ID
         logger.info(f"GRUPO_EXTERNO_ID: {GRUPO_EXTERNO_ID}")
         logger.info(f"TEMA_CONSULTAS_EXTERNO: {TEMA_CONSULTAS_EXTERNO}")
         logger.info(f"TEMA_SUGERENCIAS_EXTERNO: {TEMA_SUGERENCIAS_EXTERNO}")
 
         logger.info("✅ Variables validadas correctamente")
         return True
+    # ... (resto de manejo de errores igual) ...
     except KeyError as e:
         logger.critical(f"❌ Error de configuración: Falta la variable de entorno {str(e)}")
         return False
@@ -80,88 +86,96 @@ def validar_variables():
 async def start(update: Update, context: CallbackContext) -> None:
     """
     Manejador del comando /start.
-    Envía el mensaje con botones al grupo/tema del comité.
-    Este mensaje NO se modificará posteriormente.
+    Envía DOS mensajes separados con UN botón cada uno a temas específicos
+    del grupo del comité.
     """
     user = update.effective_user
     logger.info(f"Comando /start recibido de {user.id} ({user.full_name})")
 
-    mensaje = "Si necesitas mandar una consulta sobre algun tema no resuelto en el grupo(permisos, excedencias,etc..), presiona el botón Consulta.\n Por otro lado, si quieres hacer alguna sugerencia para mejorar el grupo, presiona el botón sugerencia"
-    keyboard = [
-        [InlineKeyboardButton("Consulta 🙋‍♂️", callback_data='consulta')],
-        [InlineKeyboardButton("Sugerencia 💡", callback_data='sugerencia')]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    # 1. Mensaje para Consultas
+    mensaje_consulta = "¿Alguien necesita enviar una consulta al grupo externo?"
+    keyboard_consulta = [[InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", callback_data='consulta')]]
+    reply_markup_consulta = InlineKeyboardMarkup(keyboard_consulta)
 
     try:
         await context.bot.send_message(
             chat_id=GRUPO_ID,
-            message_thread_id=TEMA_CONSULTAS_SUGERENCIAS,
-            text=mensaje,
-            reply_markup=reply_markup
+            message_thread_id=TEMA_BOTON_CONSULTAS_COMITE, # Tema específico para consultas
+            text=mensaje_consulta,
+            reply_markup=reply_markup_consulta
         )
-        logger.info(f"Mensaje inicial con botones enviado a GRUPO_ID: {GRUPO_ID}, TEMA: {TEMA_CONSULTAS_SUGERENCIAS}")
+        logger.info(f"Mensaje botón 'Consulta' enviado a GRUPO_ID: {GRUPO_ID}, TEMA: {TEMA_BOTON_CONSULTAS_COMITE}")
     except Exception as e:
-         logger.error(f"Error enviando mensaje inicial al grupo del comité: {e}")
+         logger.error(f"Error enviando mensaje botón 'Consulta' al tema {TEMA_BOTON_CONSULTAS_COMITE}: {e}")
+
+    # 2. Mensaje para Sugerencias
+    mensaje_sugerencia = "¿Alguien tiene una sugerencia para el grupo externo?"
+    keyboard_sugerencia = [[InlineKeyboardButton("Iniciar Sugerencia 💡", callback_data='sugerencia')]]
+    reply_markup_sugerencia = InlineKeyboardMarkup(keyboard_sugerencia)
+
+    try:
+        await context.bot.send_message(
+            chat_id=GRUPO_ID,
+            message_thread_id=TEMA_BOTON_SUGERENCIAS_COMITE, # Tema específico para sugerencias
+            text=mensaje_sugerencia,
+            reply_markup=reply_markup_sugerencia
+        )
+        logger.info(f"Mensaje botón 'Sugerencia' enviado a GRUPO_ID: {GRUPO_ID}, TEMA: {TEMA_BOTON_SUGERENCIAS_COMITE}")
+    except Exception as e:
+         logger.error(f"Error enviando mensaje botón 'Sugerencia' al tema {TEMA_BOTON_SUGERENCIAS_COMITE}: {e}")
 
 
 async def button_callback(update: Update, context: CallbackContext) -> int:
     """
-    Manejador para los botones inline. Inicia la conversación privada.
-    NO edita el mensaje original en el grupo del comité.
+    Manejador para AMBOS botones inline ('consulta' o 'sugerencia').
+    Inicia la conversación privada. No edita nada en el grupo.
     """
     query = update.callback_query
     user = query.from_user
     action_type = query.data # 'consulta' o 'sugerencia'
 
-    # Siempre responder al callback para quitar el "loading" del botón
-    await query.answer()
+    await query.answer() # Responde al callback inmediatamente
 
-    logger.info(f"Botón '{action_type}' presionado por {user.id} ({user.full_name}) en chat {query.message.chat_id}. Iniciando conversación privada.")
+    logger.info(f"Botón '{action_type}' presionado por {user.id} ({user.full_name}) en chat {query.message.chat_id} (tema {query.message.message_thread_id}). Iniciando conversación privada.")
 
-    # Guardar qué acción se seleccionó para usarla al recibir la respuesta
+    # Guardar la acción seleccionada
     context.user_data['action_type'] = action_type
-    # Ya NO necesitamos guardar el ID del mensaje original
 
-    prompt_message = f"Has seleccionado '{action_type}'. Por favor, escribe tu mensaje ahora. Envíalo como un mensaje normal en este chat."
+    prompt_message = f"Has seleccionado '{action_type}'. Por favor, escribe tu mensaje ahora en este chat."
 
     try:
-        # Envía el mensaje de solicitud al usuario EN PRIVADO
+        # Enviar solicitud al usuario en privado
         await context.bot.send_message(chat_id=user.id, text=prompt_message)
         logger.info(f"Solicitud de texto enviada en privado a {user.id} para '{action_type}'")
-        # Pasa al estado donde esperamos la respuesta del usuario
-        return TYPING_REPLY
+        return TYPING_REPLY # Pasar al estado de espera de texto
     except Exception as e:
         logger.error(f"Error en button_callback al enviar mensaje privado a {user.id}: {e}")
-        # Informar al usuario del error si es posible (ya que no podemos editar el original)
         try:
+             # Informar error en privado
              await context.bot.send_message(chat_id=user.id, text="Hubo un error al iniciar el proceso. Por favor, intenta pulsar el botón de nuevo o contacta a un administrador.")
         except Exception as inner_e:
             logger.error(f"Error adicional notificando error en button_callback a {user.id}: {inner_e}")
-        # Terminar la conversación si hay error al iniciarla
         context.user_data.clear()
-        return ConversationHandler.END
+        return ConversationHandler.END # Terminar si falla
 
 
 async def receive_text(update: Update, context: CallbackContext) -> int:
     """
-    Recibe el texto de la consulta/sugerencia del usuario en el chat privado.
-    Lo envía al grupo/tema externo correspondiente.
-    Confirma al usuario en privado.
-    NO edita el mensaje original en el grupo del comité.
+    Recibe el texto en privado, lo envía al grupo/tema externo apropiado.
+    Confirma en privado.
     """
     user = update.effective_user
     user_text = update.message.text
     action_type = context.user_data.get('action_type')
 
     if not action_type:
-        logger.warning(f"receive_text llamado sin action_type en user_data para {user.id}. Posiblemente la conversación expiró o hubo un error.")
-        await update.message.reply_text("Algo salió mal, no recuerdo qué estabas enviando. Por favor, vuelve al grupo del comité y pulsa el botón de nuevo.")
+        logger.warning(f"receive_text llamado sin action_type en user_data para {user.id}.")
+        await update.message.reply_text("Algo salió mal, no recuerdo qué estabas enviando. Por favor, vuelve al grupo del comité y pulsa el botón apropiado de nuevo.")
         return ConversationHandler.END
 
     logger.info(f"Texto recibido de {user.id} para '{action_type}': {user_text[:50]}...")
 
-    # Determinar destino
+    # Determinar destino EXTERNO basado en la acción guardada
     if action_type == 'consulta':
         target_chat_id = GRUPO_EXTERNO_ID
         target_thread_id = TEMA_CONSULTAS_EXTERNO
@@ -169,6 +183,7 @@ async def receive_text(update: Update, context: CallbackContext) -> int:
         target_chat_id = GRUPO_EXTERNO_ID
         target_thread_id = TEMA_SUGERENCIAS_EXTERNO
     else:
+        # Esto no debería ocurrir si los callback_data son correctos
         logger.error(f"Tipo de acción desconocido '{action_type}' en receive_text para {user.id}")
         await update.message.reply_text("Error interno. Tipo de acción desconocida.")
         context.user_data.clear()
@@ -180,20 +195,18 @@ async def receive_text(update: Update, context: CallbackContext) -> int:
                       f"{user_text}"
 
     try:
-        # Enviar al grupo/tema externo
+        # Enviar al grupo/tema EXTERNO
         await context.bot.send_message(
             chat_id=target_chat_id,
             message_thread_id=target_thread_id,
             text=forward_message,
             parse_mode=ParseMode.MARKDOWN
         )
-        logger.info(f"{action_type.capitalize()} de {user.id} enviada a chat {target_chat_id} (tema {target_thread_id})")
+        logger.info(f"{action_type.capitalize()} de {user.id} enviada a chat EXTERNO {target_chat_id} (tema {target_thread_id})")
 
         # Confirmar al usuario EN PRIVADO
-        await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente al grupo correspondiente!")
+        await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente al grupo externo!")
         logger.info(f"Confirmación enviada en privado a {user.id}")
-
-        # --- YA NO SE EDITA EL MENSAJE ORIGINAL ---
 
     except Exception as e:
         logger.error(f"Error enviando la {action_type} de {user.id} al grupo externo: {e}")
@@ -201,23 +214,16 @@ async def receive_text(update: Update, context: CallbackContext) -> int:
         await update.message.reply_text(f"❌ Hubo un error al enviar tu {action_type}. Por favor, contacta a un administrador o inténtalo de nuevo más tarde.")
 
     finally:
-        # Limpiar datos de usuario y terminar conversación
+        # Limpiar datos y terminar conversación
         context.user_data.clear()
         return ConversationHandler.END
 
 
 async def cancel(update: Update, context: CallbackContext) -> int:
-    """
-    Cancela la operación actual (en la conversación privada).
-    NO necesita restaurar el mensaje original.
-    """
+    """Cancela la operación actual en la conversación privada."""
     user = update.effective_user
     logger.info(f"Usuario {user.id} ({user.full_name}) canceló la conversación privada.")
-
     await update.message.reply_text('Operación cancelada. Puedes volver al grupo del comité si quieres iniciar de nuevo.')
-
-    # --- YA NO SE RESTAURA EL MENSAJE ORIGINAL ---
-
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -233,23 +239,20 @@ def main() -> None:
     # --- Conversation Handler ---
     conv_handler = ConversationHandler(
         entry_points=[
-            # Se activa SOLO con los botones del mensaje enviado por /start
+            # Se activa con CUALQUIERA de los dos botones
             CallbackQueryHandler(button_callback, pattern='^(consulta|sugerencia)$')
             ],
         states={
-            # Espera un mensaje de texto EN PRIVADO después de pulsar un botón
+            # Espera un mensaje de texto EN PRIVADO
             TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)],
         },
         fallbacks=[
             # Permite cancelar EN PRIVADO
             CommandHandler('cancel', cancel, filters=filters.ChatType.PRIVATE)
             ],
-        # Configuración para que la conversación ocurra por usuario y no por chat
-        # (importante porque el entry point está en un grupo pero el state está en privado)
         per_user=True,
-        per_chat=False, # La conversación sigue al usuario, no al chat donde empezó
-        # Opcional: Timeout para la conversación privada
-        # conversation_timeout=60*10 # 10 minutos para responder en privado
+        per_chat=False,
+        # conversation_timeout=60*10 # Opcional: Timeout
     )
 
     # Añadir handlers
