@@ -86,7 +86,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     user = update.effective_user
     logger.info(f"Comando /start recibido de {user.id} ({user.full_name})")
 
-    mensaje = "¿Alguien quiere enviar una consulta o sugerencia al grupo externo?"
+    mensaje = "Si necesitas mandar una consulta sobre algun tema no resuelto en el grupo(permisos, excedencias,etc..), presiona el botón Consulta.\n Por otro lado, si quieres hacer alguna sugerencia para mejorar el grupo, presiona el botón sugerencia"
     keyboard = [
         [InlineKeyboardButton("Consulta 🙋‍♂️", callback_data='consulta')],
         [InlineKeyboardButton("Sugerencia 💡", callback_data='sugerencia')]
