@@ -242,31 +242,33 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
     # Otros casos (raro)
     return ConversationHandler.END
 
-# --- Handler para Recibir Texto (Consulta/Sugerencia) ---
+# --- MODIFICADO: receive_text para ser más robusto al finalizar ---
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Recibe el texto en privado. Si es consulta, valida palabras clave.
     Si es válido (o es sugerencia), lo envía al grupo/tema externo apropiado.
-    Confirma en privado.
+    Confirma en privado y finaliza la conversación de forma definitiva.
     """
     user = update.effective_user
-    message = update.message # Mensaje recibido
+    message = update.message
     if not message or not message.text:
         logger.warning(f"Update sin texto recibido en estado TYPING_REPLY de {user.id}. Ignorando.")
-        return TYPING_REPLY # Permanecer en el mismo estado esperando texto válido
+        return TYPING_REPLY
 
     user_text = message.text
-    action_type = context.user_data.get('action_type')
+    # Usar pop para obtener Y eliminar el estado, asegurando que no se reutilice accidentalmente
+    action_type = context.user_data.pop('action_type', None)
 
     if not action_type:
-        logger.warning(f"receive_text llamado sin action_type en user_data para {user.id}. Probablemente la conversación expiró o se reinició.")
-        await update.message.reply_text("Parece que hubo un problema o la sesión expiró. Por favor, inicia el proceso de nuevo usando los botones del grupo del comité.")
+        logger.warning(f"receive_text llamado sin action_type en user_data (pop) para {user.id}.")
+        # No enviar mensaje aquí si ya no hay estado, podría ser confuso
         return ConversationHandler.END
 
-    logger.info(f"Texto recibido de {user.id} para '{action_type}': {user_text[:100]}...") # Log un poco más largo
+    logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
 
     # --- Validación de Palabras Clave (SOLO para consultas) ---
     if action_type == 'consulta':
+        # ... (Bloque de validación de palabras clave SIN CAMBIOS) ...
         text_lower = user_text.lower()
         forbidden_keywords_map = {
             "bolsa de horas": "bolsa de horas", "permiso": "permisos",
@@ -276,21 +278,53 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         }
         found_forbidden_topic = None
         for keyword, topic_name in forbidden_keywords_map.items():
-            # Usar word boundaries (\b) con regex para mayor precisión si fuera necesario
-            # Por ahora, 'in' es suficiente
-            if keyword in text_lower:
-                found_forbidden_topic = topic_name
-                break
+            if keyword in text_lower: found_forbidden_topic = topic_name; break
         if found_forbidden_topic:
-            logger.warning(f"Consulta de {user.id} rechazada por palabra clave: '{found_forbidden_topic}'")
-            error_message = (
-                f"❌ Tu consulta sobre '{found_forbidden_topic}' no se puede procesar por aquí.\n\n"
-                f"Este tema ya tiene información detallada en el grupo o la documentación del comité. "
-                f"Por favor, consulta esas fuentes primero. Si después sigues teniendo dudas específicas no resueltas, puedes replantear tu consulta sin mencionar directamente '{found_forbidden_topic}' de forma genérica."
-            )
-            await update.message.reply_text(error_message)
-            context.user_data.clear()
+            logger.warning(f"Consulta de {user.id} rechazada: '{found_forbidden_topic}'")
+            error_message = (f"❌ Tu consulta sobre '{found_forbidden_topic}' no se procesa por aquí.\n\nConsulta la info en el grupo/documentación. Si tienes dudas específicas no resueltas, replantea sin mencionar '{found_forbidden_topic}'.")
+            try:
+                 await update.message.reply_text(error_message)
+            except Exception as e_reply:
+                 logger.error(f"Error enviando msg rechazo a {user.id}: {e_reply}")
+            # context.user_data ya se limpió con pop
             return ConversationHandler.END
+    # --- Fin Validación ---
+
+    # Determinar destino EXTERNO
+    if action_type == 'consulta': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
+    elif action_type == 'sugerencia': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
+    else: logger.error(f"Tipo acción desconocido '{action_type}' en receive_text {user.id}"); await update.message.reply_text("Error interno."); return ConversationHandler.END # Limpiar user_data no es necesario (se hizo con pop)
+
+    # Formatear y enviar
+    user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else "")
+    forward_message = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
+    send_success = False
+    try:
+        await context.bot.send_message(chat_id=target_chat_id, message_thread_id=target_thread_id, text=forward_message, parse_mode=ParseMode.MARKDOWN)
+        logger.info(f"{action_type.capitalize()} de {user_info} (ID: {user.id}) enviada a {target_chat_id} (T:{target_thread_id})")
+        send_success = True
+    except TelegramError as e: logger.error(f"Error TG enviando {action_type} de {user.id}: {e}")
+    except Exception as e: logger.error(f"Error Inesperado enviando {action_type} de {user.id}: {e}", exc_info=True)
+
+    # Confirmar al usuario DESPUÉS de intentar enviar
+    if send_success:
+        try:
+            await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias.")
+            logger.info(f"Confirmación enviada en privado a {user.id}")
+        except Exception as e_confirm:
+             logger.error(f"Error enviando confirmación a {user.id}: {e_confirm}")
+    else:
+        try:
+            await update.message.reply_text(f"❌ Hubo un error al enviar tu {action_type} al grupo externo. Por favor, contacta a un administrador.")
+        except Exception as e_fail_confirm:
+             logger.error(f"Error enviando msg de fallo a {user.id}: {e_fail_confirm}")
+
+
+    # Asegurarse de que user_data esté limpio (aunque pop ya lo hizo)
+    context.user_data.clear()
+
+    # Indicar que la conversación ha terminado definitivamente para este update
+    return ConversationHandler.END
     # --- Fin Validación ---
 
     # Determinar destino EXTERNO
