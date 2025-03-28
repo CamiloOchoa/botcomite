@@ -1,54 +1,54 @@
-from flask import Flask
-import logging
 import os
 import re
+import logging
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler
-)
-from threading import Thread
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 
-# ======================================
-# CONFIGURACIÓN INICIAL
-# ======================================
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.StreamHandler()]
-)
+# Configuración del logging (puedes editar el nivel o el formato si lo deseas)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ======================================
 # VALIDACIÓN DE VARIABLES DE ENTORNO
-# ======================================
 def validar_variables():
     try:
-        # Telegram Token
+        # Token del bot
         global TOKEN
         TOKEN = os.environ["TELEGRAM_TOKEN"].strip()
         if not TOKEN or ":" not in TOKEN:
             raise ValueError("Formato de token inválido")
 
-        # Group ID
-        global GRUPO_ID
-        grupo_id_raw = os.environ["GROUP_ID"].strip()
-        grupo_id_limpio = re.sub(r"[^-\d]", "", grupo_id_raw)
-        GRUPO_ID = int(grupo_id_limpio.split("=")[-1]) if "=" in grupo_id_limpio else int(grupo_id_limpio)
-        
-        if not (-1009999999999 < GRUPO_ID < -1000000000000):
-            raise ValueError("ID de grupo inválido")
+        # ID del grupo común donde se publicarán consultas y sugerencias
+        global GRUPO_COMUN
+        grupo_comun_raw = os.environ["GRUPO_COMUN"].strip()
+        grupo_comun_limpio = re.sub(r"[^-\d]", "", grupo_comun_raw)
+        GRUPO_COMUN = int(grupo_comun_limpio.split("=")[-1]) if "=" in grupo_comun_limpio else int(grupo_comun_limpio)
+        if not (-1009999999999 < GRUPO_COMUN < -1000000000000):
+            raise ValueError("ID de grupo común inválido")
 
-        # Bot Username
+        # ID del tema para consultas
+        global TEMA_CONSULTAS
+        tema_consultas_raw = os.environ["TEMA_CONSULTAS"].strip()
+        tema_consultas_limpio = re.sub(r"[^0-9]", "", tema_consultas_raw)
+        TEMA_CONSULTAS = int(tema_consultas_limpio)
+        if TEMA_CONSULTAS <= 0:
+            raise ValueError("ID de tema de consultas inválido")
+
+        # ID del tema para sugerencias
+        global TEMA_SUGERENCIAS
+        tema_sugerencias_raw = os.environ["TEMA_SUGERENCIAS"].strip()
+        tema_sugerencias_limpio = re.sub(r"[^0-9]", "", tema_sugerencias_raw)
+        TEMA_SUGERENCIAS = int(tema_sugerencias_limpio)
+        if TEMA_SUGERENCIAS <= 0:
+            raise ValueError("ID de tema de sugerencias inválido")
+
+        # Nombre del bot (sin @) - puedes editar si es necesario
         global BOT_USERNAME
         BOT_USERNAME = os.environ["BOT_USERNAME"].strip().lstrip('@')
         if not BOT_USERNAME:
             raise ValueError("BOT_USERNAME vacío")
 
-        # Group Link
+        # Enlace del grupo principal (puedes editar si deseas cambiarlo)
         global GROUP_LINK
         GROUP_LINK = os.environ["GROUP_LINK"].strip()
         if not GROUP_LINK.startswith("https://t.me/"):
@@ -64,102 +64,58 @@ def validar_variables():
 if not validar_variables():
     exit(1)
 
-# ======================================
-# CONFIGURACIÓN DE FLASK
-# ======================================
-app = Flask(__name__)
+# Diccionario para rastrear el tipo de mensaje (consulta o sugerencia) de cada usuario.
+# Puedes modificar este mecanismo de almacenamiento si lo deseas.
+user_context = {}
 
-@app.route('/')
-def health_check():
-    return "🟢 Bot operativo", 200
-
-# ======================================
-# HANDLERS DE TELEGRAM (CORREGIDOS)
-# ======================================
-PERMISOS = {
-    "hospitalizacion": {
-        "nombre": "🏥 Hospitalización/Reposo",
-        "info": """📋 **Hospitalización/Intervención/Reposo:
-- Duración: 2 días naturales
-- Documentación: Certificado médico"""
-    }
-}
-
+# Comando /start para mostrar los botones
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        teclado = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Ver permisos", callback_data="menu_permisos")],
-            [InlineKeyboardButton("Unirse al grupo", url=GROUP_LINK)]
-        ])
-        
-        await update.message.reply_text(
-            "¡Bienvenido al bot del Comité! Elige una opción:",
-            reply_markup=teclado
-        )
-    except Exception as e:
-        logger.error(f"Error en comando start: {str(e)}")
+    # Teclado inline con dos opciones: Consulta y Sugerencia
+    teclado = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📩 Enviar Consulta", callback_data="consulta")],
+        [InlineKeyboardButton("💡 Enviar Sugerencia", callback_data="sugerencia")]
+    ])
+    await update.message.reply_text("Selecciona una opción:", reply_markup=teclado)
 
-async def manejar_permisos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Función para recibir mensajes privados de los usuarios
+async def recibir_mensaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+    text = update.message.text
+
+    # Si el usuario no ha seleccionado una opción previamente, se le indica cómo proceder.
+    if user_id not in user_context:
+        await update.message.reply_text("Usa el botón adecuado para enviar consultas o sugerencias. Las respuestas solo serán vistas por los miembros del comité.")
+        return
+
+    # Se obtiene el tipo de mensaje (consulta o sugerencia) y se elimina del contexto
+    tipo = user_context.pop(user_id)
+    # Se define el tema de destino según el tipo, dentro del grupo común
+    mensaje_thread_id = TEMA_CONSULTAS if tipo == "consulta" else TEMA_SUGERENCIAS
+    # Mensaje formateado que se enviará al grupo en el tema correspondiente
+    mensaje = f"📥 *Nueva {tipo} de @{update.message.from_user.username}:*\n{text}"
+    await context.bot.send_message(chat_id=GRUPO_COMUN, message_thread_id=mensaje_thread_id, text=mensaje, parse_mode="Markdown")
+    await update.message.reply_text("✅ Tu mensaje ha sido enviado.")
+
+# Función para manejar la selección del botón (consulta o sugerencia)
+async def manejar_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    
-    try:
-        permiso = PERMISOS["hospitalizacion"]
-        await query.edit_message_text(
-            text=f"**{permiso['nombre']}**\n\n{permiso['info']}",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Volver al inicio", callback_data="menu_inicio")]
-            ])  # ¡CORRECCIÓN AQUÍ! Se añadió el bracket faltante
-        )
-    except Exception as e:
-        logger.error(f"Error manejando permisos: {str(e)}")
+    # Se guarda el tipo de mensaje en el diccionario
+    user_context[query.from_user.id] = query.data
+    # Se envía un mensaje privado solicitando al usuario que escriba su consulta o sugerencia
+    await context.bot.send_message(chat_id=query.from_user.id, text=f"✍️ Escribe tu {query.data} y envíamela.")
 
-# ======================================
-# CONFIGURACIÓN DEL BOT
-# ======================================
+# Función principal que inicializa y ejecuta el bot
 async def main():
     application = Application.builder().token(TOKEN).build()
-    
+    # Handler para el comando /start
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(manejar_permisos, pattern="^menu_"))
-    
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-    
-    # Mantener el bot activo
-    while True:
-        await asyncio.sleep(3600)
+    # Handler para los botones de consulta y sugerencia
+    application.add_handler(CallbackQueryHandler(manejar_query, pattern="^(consulta|sugerencia)$"))
+    # Handler para los mensajes de texto enviados en privado
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_mensaje))
+    await application.run_polling()
 
-# ======================================
-# EJECUCIÓN PRINCIPAL
-# ======================================
 if __name__ == "__main__":
-    if os.environ.get("RAILWAY_ENVIRONMENT") == "production":
-        from gunicorn.app.base import BaseApplication
+    asyncio.run(main())
 
-        class GunicornApp(BaseApplication):
-            def __init__(self, app, options=None):
-                self.application = app
-                self.options = options or {}
-                super().__init__()
-
-            def load_config(self):
-                for key, value in self.options.items():
-                    self.cfg.set(key, value)
-
-            def load(self):
-                return self.application
-
-        # Configuración de Gunicorn
-        options = {
-            'bind': '0.0.0.0:8080',
-            'workers': 4,
-            'timeout': 120
-        }
-        GunicornApp(app, options).run()
-        
-    else:  # Entorno de desarrollo
-        app.run(host='0.0.0.0', port=8080, use_reloader=False)
-        asyncio.run(main())
