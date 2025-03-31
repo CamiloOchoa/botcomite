@@ -181,7 +181,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
                 context.user_data.clear()
                 logger.info(f"Payload '{payload}' válido recibido de {user.id}. Iniciando flujo para '{action_type}'.")
                 context.user_data['action_type'] = action_type
-                prompt = f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje."
+                prompt = f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje.\n - Recuerda que la {action_type} solo la pueden ver los miembros del comité. \n - Recibirás una respuesta en la mayor brevedad posible."
                 await update.message.reply_text(prompt)
                 # Se retorna el estado para que el primer mensaje se capture en receive_text
                 return TYPING_REPLY
@@ -195,7 +195,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
             # /start sin payload
             logger.info(f"/start simple (sin payload) de {user.id}. Enviando saludo genérico.")
             await update.message.reply_text(
-                f"¡Hola {user.first_name}! Por favor, escribe ahora tu sugerencia en un único mensaje.\n - Recuerda que las sugerencias(consultas) solo las pueden ver los miembros del comité. \n - Recibirás una respuesta en la mayor brevedad posible."
+                f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje.\n - Recuerda que la {action_type} solo la pueden ver los miembros del comité. \n - Recibirás una respuesta en la mayor brevedad posible."
             )
             context.user_data.clear()
             raise ApplicationHandlerStop
