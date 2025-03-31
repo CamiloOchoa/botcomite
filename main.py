@@ -8,11 +8,11 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackContext,
-    ConversationHandler,
+    ConversationHandler, # <-- Importar directamente
     MessageHandler,
     filters,
     ContextTypes,
-    ApplicationHandlerStop # <-- ASEGURARSE DE IMPORTAR ESTO
+    ApplicationHandlerStop # <-- Mantener importación por si acaso
 )
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
@@ -67,7 +67,7 @@ def validar_variables():
 # --- Función para Enviar Botones Iniciales ---
 async def post_initial_buttons(context: CallbackContext) -> bool:
     """ Envía los mensajes iniciales con botones URL. """
-    # ... (Sin cambios respecto a la versión anterior) ...
+    # ... (Sin cambios) ...
     if not BOT_USERNAME or not GRUPO_ID: return False
     if TEMA_BOTON_CONSULTAS_COMITE <= 0 or TEMA_BOTON_SUGERENCIAS_COMITE <= 0: return False
     success_count = 0; msg_con = ("Pulsa si tienes consulta (permisos, bolsa horas, excedencias...). Privado. 1 mensaje."); url_con = f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta"; kb_con = [[InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=url_con)]]; markup_con = InlineKeyboardMarkup(kb_con)
@@ -81,7 +81,7 @@ async def post_initial_buttons(context: CallbackContext) -> bool:
 # --- Comando para Postear Botones ---
 async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """ Comando /postbotones (uso privado). """
-    # ... (Sin cambios respecto a la versión anterior) ...
+    # ... (Sin cambios) ...
     user = update.effective_user; chat = update.effective_chat
     if not chat or chat.type != 'private': return
     logger.info(f"/postbotones de {user.id}. Ejecutando..."); await update.message.reply_text("Intentando publicar/actualizar botones...")
@@ -93,7 +93,7 @@ async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYP
 # --- Handler para /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
     """ Manejador del comando /start. """
-    # ... (Sin cambios respecto a la versión anterior) ...
+    # ... (Sin cambios) ...
     user = update.effective_user; chat = update.effective_chat; args = context.args
     logger.info(f"/start de {user.id} chat:{chat.id if chat else '?'} ({chat.type if chat else '?'}). Args:{args}")
     if chat and chat.type == "private" and args:
@@ -103,25 +103,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
         if action_type: context.user_data.clear(); logger.info(f"Payload '{payload}' de {user.id}. Iniciando {action_type}."); context.user_data['action_type'] = action_type; prompt = f"¡Hola {user.first_name}! Escribe tu {action_type}."; await update.message.reply_text(prompt); return TYPING_REPLY
         else: logger.warning(f"Payload desconocido '{payload}' de {user.id}."); await update.message.reply_text("Enlace inválido."); context.user_data.clear(); return ConversationHandler.END
     elif chat and chat.type == "private": logger.info(f"/start simple de {user.id}."); await update.message.reply_text(f"¡Hola {user.first_name}! Usa los botones del grupo."); context.user_data.clear(); return ConversationHandler.END
-    return None # Ignorar en otros tipos de chat
+    return None
 
 # --- Handler para Recibir Texto (Consulta/Sugerencia) ---
-# --- VERSION FINAL USANDO raise ApplicationHandlerStop ---
+# --- VOLVIENDO a return ConversationHandler.END ---
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Recibe texto en privado. Valida. Envía. Confirma.
-    DETIENE propagación con raise ApplicationHandlerStop.
-    No devuelve estado directamente, la excepción lo maneja.
+    Retorna ConversationHandler.END para finalizar.
     """
     user = update.effective_user; message = update.message
-    if not message or not message.text: return TYPING_REPLY # Ignorar updates sin texto, mantener estado
-
+    if not message or not message.text: return TYPING_REPLY # Ignorar updates sin texto
     user_text = message.text
-    action_type = context.user_data.pop('action_type', None) # Obtener Y eliminar
+    # Pop action_type: si no existe, la conversación ya terminó o no empezó bien
+    action_type = context.user_data.pop('action_type', None)
 
     if not action_type:
-        logger.warning(f"receive_text sin action_type para {user.id}. Deteniendo.")
-        raise ApplicationHandlerStop # Detener si no se esperaba
+        logger.warning(f"receive_text sin action_type para {user.id}. Terminando.")
+        # No necesitamos detener la propagación aquí explícitamente
+        # Si este handler fue llamado, ya consumió el update para el ConvHandler
+        return ConversationHandler.END
 
     logger.info(f"Procesando '{action_type}' de {user.id}: {user_text[:50]}...")
     found_forbidden_topic = None
@@ -136,20 +137,20 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             error_msg = (f"❌ Consulta sobre '{found_forbidden_topic}' no procesada. Revisa info grupo/docs.")
             try: await update.message.reply_text(error_msg)
             except Exception as e: logger.error(f"Error msg rechazo {user.id}: {e}")
-            context.user_data.clear() # Limpiar datos
-            raise ApplicationHandlerStop # Detener tras rechazo
+            context.user_data.clear() # Asegurar limpieza
+            return ConversationHandler.END # Terminar tras rechazo
 
     # Envío si no fue rechazada
     if not found_forbidden_topic:
         target_chat_id = None
         if action_type == 'consulta': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
         elif action_type == 'sugerencia': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
-        else:
+        else: # Error interno, action_type inválido
             logger.error(f"Tipo '{action_type}' inesperado {user.id}")
             try: await update.message.reply_text("Error interno.")
             except Exception: pass
-            context.user_data.clear()
-            raise ApplicationHandlerStop # Detener por error
+            context.user_data.clear() # Asegurar limpieza
+            return ConversationHandler.END # Terminar por error
 
         if target_chat_id:
             user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else ""); fwd_msg = f"ℹ️ **{action_type.capitalize()} de {user_info}**:\n\n{user_text}"
@@ -164,13 +165,15 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 try: await update.message.reply_text(f"❌ Error al enviar. Contacta admin.")
                 except Exception as e: logger.error(f"Error msg fallo {user.id}: {e}")
 
-            context.user_data.clear()
-            raise ApplicationHandlerStop # Detener tras procesar (éxito o fallo)
+            # No necesitamos limpiar context.user_data aquí, pop ya lo hizo
+            return ConversationHandler.END # Terminar tras procesar (éxito o fallo)
 
-    # Este punto no debería alcanzarse si la lógica anterior es correcta
+    # Si llegamos aquí fue consulta rechazada, ya se retornó END
+    # O hubo un error interno, ya se retornó END
+    # Este return es un fallback final, no debería alcanzarse.
     logger.warning(f"receive_text alcanzó fin inesperado {user.id}.")
-    context.user_data.clear()
-    raise ApplicationHandlerStop
+    context.user_data.clear() # Limpiar por si acaso
+    return ConversationHandler.END
 
 # --- Handler para /cancel ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -184,7 +187,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # --- Handler para Mensajes Inesperados ---
 async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """ Responde a mensajes de texto inesperados en privado. """
-    # ... (Sin cambios, mantiene el check de 'action_type' por seguridad) ...
+    # ... (Sin cambios, mantiene el check de 'action_type') ...
     user = update.effective_user; chat = update.effective_chat
     if not chat or chat.type != 'private' or not update.message or not update.message.text: return
     if 'action_type' in context.user_data: logger.debug(f"handle_unexpected_message: Ignorando msg de {user.id} ('action_type' existe)."); return
@@ -200,23 +203,20 @@ def main() -> None:
     application = Application.builder().token(TOKEN).build()
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start, filters=filters.ChatType.PRIVATE)],
-        states={ TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)] }, # receive_text maneja la salida con raise
+        states={ TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)] }, # Usando receive_text que retorna END
         fallbacks=[ CommandHandler('cancel', cancel, filters=filters.ChatType.PRIVATE), CommandHandler('start', start, filters=filters.ChatType.PRIVATE)],
         allow_reentry=True, per_user=True, per_chat=True, name="consulta_sugerencia_conv", persistent=False
     )
     # --- Registro de Handlers ---
     application.add_handler(conv_handler, group=0)
     application.add_handler(CommandHandler("postbotones", post_buttons_command, filters=filters.ChatType.PRIVATE), group=1)
-    application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_unexpected_message), group=2) # Este SÍ debe ejecutarse si los anteriores no detienen
+    application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_unexpected_message), group=2)
     #---
     logger.info("--- Iniciando Polling del Bot ---")
     try: application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e: logger.critical(f"--- ERROR CRÍTICO POLLING ---: {e}", exc_info=True)
     finally: logger.info("--- Bot Detenido ---")
 
-if __name__ == '__main__':
-    try: main()
-    except Exception as e: logger.critical(f"Error fatal inicializando bot: {e}", exc_info=True)
 if __name__ == '__main__':
     try: main()
     except Exception as e: logger.critical(f"Error fatal inicializando bot: {e}", exc_info=True)
