@@ -1,6 +1,7 @@
 import os
 import logging
 import re
+from telegram.ext import ApplicationHandlerStop
 from telegram.ext import ConversationHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -116,85 +117,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
     elif chat and chat.type in ["group", "supergroup", "channel"]: logger.info(f"/start en {chat.type} {chat.id}. Ignorando."); return None
     return ConversationHandler.END # Default a terminar
 
-# --- MODIFICADO: receive_text volviendo a return ConversationHandler.END ---
-async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Recibe el texto en privado. Valida. Envía. Confirma.
-    Retorna ConversationHandler.END para finalizar.
-    """
-    user = update.effective_user
-    message = update.message
-    if not message or not message.text:
-        logger.warning(f"Update sin texto recibido en estado TYPING_REPLY de {user.id}. Ignorando.")
-        return TYPING_REPLY # Mantener estado
-
-    user_text = message.text
-    # Usar get() primero para loguear, luego pop() para asegurar limpieza si existe
-    action_type_check = context.user_data.get('action_type') # Solo para loguear si existe
-    action_type = context.user_data.pop('action_type', None) # Obtener y eliminar
-
-    if not action_type:
-        # Si el pop devolvió None, la conversación ya terminó.
-        # No deberíamos llegar aquí idealmente si el ConversationHandler funciona bien,
-        # pero si lo hacemos, solo logueamos y terminamos.
-        logger.warning(f"receive_text llamado PERO action_type ya no estaba en user_data para {user.id}. Estado original era: {action_type_check}. Terminando.")
-        # No lanzar excepción aquí, simplemente terminar.
-        return ConversationHandler.END
-
-    logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
-    found_forbidden_topic = None # Inicializar
-
-    # Validación de Palabras Clave (SOLO para consultas)
-    if action_type == 'consulta':
-        text_lower = user_text.lower()
-        forbidden_keywords_map = { "bolsa de horas": "bolsa de horas", "permiso": "permisos", "permisos": "permisos", "incapacidad temporal": "incapacidad temporal", "baja": "incapacidad temporal", "excedencia": "excedencias", "excedencias": "excedencias" }
-        for keyword, topic_name in forbidden_keywords_map.items():
-            if keyword in text_lower: found_forbidden_topic = topic_name; break
-        if found_forbidden_topic:
-            logger.warning(f"Consulta de {user.id} rechazada: '{found_forbidden_topic}'")
-            error_message = (f"❌ Tu consulta sobre '{found_forbidden_topic}' no se procesa por aquí.\n\nConsulta info en grupo/docs. Si dudas específicas, replantea sin mencionar '{found_forbidden_topic}'.")
-            try: await update.message.reply_text(error_message)
-            except Exception as e_reply: logger.error(f"Error enviando msg rechazo a {user.id}: {e_reply}")
-            # user_data ya se limpió con pop
-            return ConversationHandler.END # Terminar aquí
-
-    # Si NO fue rechazada por palabras clave, proceder a enviar
-    if not found_forbidden_topic:
-        target_chat_id = None
-        if action_type == 'consulta': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
-        elif action_type == 'sugerencia': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
-        else:
-             logger.error(f"Tipo acción '{action_type}' inesperado {user.id}");
-             try: await update.message.reply_text("Error interno.");
-             except Exception: pass
-             # user_data ya se limpió con pop
-             return ConversationHandler.END # Terminar por error
-
-        if target_chat_id:
-            user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else ""); forward_message = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
-            send_success = False
-            try:
-                await context.bot.send_message(chat_id=target_chat_id, message_thread_id=target_thread_id, text=forward_message, parse_mode=ParseMode.MARKDOWN);
-                logger.info(f"{action_type.capitalize()} de {user_info} (ID:{user.id}) enviada a {target_chat_id}(T:{target_thread_id})");
-                send_success = True
-            except Exception as e:
-                logger.error(f"Error enviando {action_type} de {user.id}: {e}", exc_info=True)
-
-            if send_success:
-                try: await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada!"); logger.info(f"Confirmación enviada a {user.id}")
-                except Exception as e_confirm: logger.error(f"Error enviando confirmación a {user.id}: {e_confirm}")
-            else:
-                try: await update.message.reply_text(f"❌ Error al enviar tu {action_type}. Contacta admin.")
-                except Exception as e_fail_confirm: logger.error(f"Error enviando msg fallo a {user.id}: {e_fail_confirm}")
-
-            # user_data ya se limpió con pop
-            return ConversationHandler.END # Terminar tras procesar (éxito o fallo)
-
-    # Si llegamos aquí, fue una consulta rechazada (ya se envió el msg de error)
-    # o un error interno manejado arriba. Asegurar que se retorna END.
-    # user_data ya debería estar limpio por el pop inicial o en los bloques anteriores.
-    logger.debug(f"receive_text alcanzando el final para {user.id} después de manejar {action_type}.")
-    return ConversationHandler.END
+else:
+    # --- BLOQUE CORREGIDO ---
+    logger.error(f"Tipo acción desconocido '{action_type}' en receive_text {user.id}")
+    try:
+        await update.message.reply_text("Error interno.")
+    except Exception:
+        pass # Ignorar error al responder si falla
+    context.user_data.clear()
+    raise ApplicationHandlerStop # Detener por error
+    # --- FIN BLOQUE CORREGIDO ---
 
 # --- Handler para /cancel (Fallback de la Conversación) ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
