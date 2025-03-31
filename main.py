@@ -90,17 +90,30 @@ async def post_initial_buttons(context: CallbackContext) -> bool:
     except Exception as e: logger.error(f"Error enviando botón 'Sugerencia' T:{TEMA_BOTON_SUGERENCIAS_COMITE}: {e}", exc_info=isinstance(e, (ValueError, TypeError)))
     return success_count > 0
 
-# --- Comando para Postear Botones (Privado) ---
 async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """ Comando /postbotones para publicar/actualizar botones (uso privado). """
-    user = update.effective_user; chat = update.effective_chat
-    if not chat or chat.type != 'private': return
+    """
+    Comando /postbotones para publicar los mensajes con botones.
+    CUALQUIER usuario puede ejecutarlo en CHAT PRIVADO con el bot.
+    """
+    user = update.effective_user
+    chat = update.effective_chat
+
+    if not chat or chat.type != 'private':
+        logger.warning(f"/postbotones ignorado: no en privado (chat_id: {chat.id if chat else '?'}).")
+        return
+
     logger.info(f"/postbotones recibido en privado de {user.id} ({user.full_name}). Ejecutando...")
-    await update.message.reply_text("Recibido. Intentando publicar/actualizar botones...")
-    try: success = await post_initial_buttons(context)
-    except Exception as e: logger.error(f"Excepción en post_initial_buttons llamado por {user.id}: {e}", exc_info=True); await update.message.reply_text("❌ Error inesperado."); return
-    if success: await update.message.reply_text("✅ ¡Hecho!")
-    else: await update.message.reply_text("⚠️ Error al enviar uno o ambos botones. Revisa logs.")
+    await update.message.reply_text("Recibido. Intentando publicar/actualizar botones en los temas del grupo del comité...")
+    try:
+        success = await post_initial_buttons(context)
+        # ESTE ES EL IF/ELSE PROBABLEMENTE AFECTADO (CERCA DE L120)
+        if success: # <-- Verifica indentación de esta línea
+            await update.message.reply_text("✅ ¡Hecho! Los botones de consulta y sugerencia deberían estar publicados/actualizados en sus temas.") # <-- Verifica indentación
+        else: # <-- ¡EL ERROR APUNTA AQUÍ! Verifica indentación de esta línea
+             await update.message.reply_text("⚠️ Se intentó publicar los botones, pero ocurrió un error al enviar uno o ambos mensajes. Revisa los logs del bot.") # <-- Verifica indentación
+    except Exception as e: # <-- Verifica indentación
+        logger.error(f"Error inesperado durante post_initial_buttons llamado por {user.id}: {e}", exc_info=True) # <-- Verifica indentación
+        await update.message.reply_text("❌ Ocurrió un error inesperado al intentar publicar los botones.") # <-- Verifica indentación
 
 # --- Handler para /start (Entrada a la Conversación) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
