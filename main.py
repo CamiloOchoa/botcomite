@@ -215,25 +215,27 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
     elif chat and chat.type in ["group", "supergroup", "channel"]: logger.info(f"/start recibido en {chat.type} {chat.id}. Ignorando."); return None
     return ConversationHandler.END
 
-# --- MODIFICADO: receive_text para usar raise ApplicationHandlerStop ---
+# --- MODIFICADO: receive_text SIN raise ApplicationHandlerStop ---
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Recibe el texto en privado. Valida. Envía. Confirma.
-    Y detiene la propagación lanzando ApplicationHandlerStop.
+    Retorna ConversationHandler.END para finalizar.
     """
     user = update.effective_user
     message = update.message
     if not message or not message.text:
         logger.warning(f"Update sin texto recibido en estado TYPING_REPLY de {user.id}. Ignorando.")
-        return TYPING_REPLY
+        return TYPING_REPLY # Permanecer en el mismo estado
 
     user_text = message.text
+    # Usar pop para obtener Y eliminar el estado
     action_type = context.user_data.pop('action_type', None)
 
     if not action_type:
-        logger.warning(f"receive_text llamado sin action_type en user_data (pop) para {user.id}.")
-        # Lanzar la excepción para detener aquí también, ya que este handler no debe hacer nada más.
-        raise ApplicationHandlerStop
+        # Si no hay action_type, la conversación ya terminó o nunca empezó.
+        # No deberíamos estar aquí, pero si llegamos, simplemente terminamos.
+        logger.warning(f"receive_text llamado sin action_type en user_data (pop) para {user.id}. Terminando.")
+        return ConversationHandler.END
 
     logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
 
@@ -257,8 +259,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             try: await update.message.reply_text(error_message)
             except Exception as e_reply: logger.error(f"Error enviando msg rechazo a {user.id}: {e_reply}")
             context.user_data.clear() # Limpiar por si acaso
-            # Terminar conversación Y detener propagación
-            raise ApplicationHandlerStop
+            return ConversationHandler.END # Terminar la conversación
     # --- Fin Validación ---
 
     # Si NO fue rechazada por palabras clave, proceder a enviar
@@ -271,8 +272,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
              try: await update.message.reply_text("Error interno.");
              except Exception: pass
              context.user_data.clear()
-             # Terminar conversación Y detener propagación por error interno
-             raise ApplicationHandlerStop
+             return ConversationHandler.END # Terminar por error
 
         if target_chat_id:
             user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else "")
@@ -292,19 +292,15 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 try: await update.message.reply_text(f"❌ Hubo un error al enviar tu {action_type} al grupo externo. Por favor, contacta a un administrador.")
                 except Exception as e_fail_confirm: logger.error(f"Error enviando msg de fallo a {user.id}: {e_fail_confirm}")
 
+            # Limpiar datos y terminar
             context.user_data.clear()
-            # Mensaje manejado (con éxito o fallo), terminar conversación Y detener propagación
-            raise ApplicationHandlerStop
+            return ConversationHandler.END # Terminar después de procesar
 
-    # --- Finalización Inesperada (si no se hizo raise antes) ---
-    # Este punto no debería alcanzarse si la lógica es correcta, pero por seguridad:
-    context.user_data.clear()
-    logger.warning(f"receive_text llegó a un punto inesperado para {user.id}. Terminando.")
-    raise ApplicationHandlerStop # Detener por si acaso
-
-    # El ConversationHandler interpretará cualquier excepción (incluida ApplicationHandlerStop)
-    # como una razón para no cambiar de estado, y al no retornar un estado válido,
-    # la conversación terminará. El `raise` asegura que no se procesen más handlers.
+    # --- Finalización si fue consulta rechazada ---
+    # Si llegamos aquí, significa que fue una consulta rechazada, ya se envió el error.
+    # Solo necesitamos asegurarnos de terminar.
+    context.user_data.clear() # Asegurar limpieza
+    return ConversationHandler.END
 
 # --- Handler para /cancel (Fallback de la Conversación) ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
