@@ -286,7 +286,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         user_info = user.full_name
         if user.username:
             user_info += f" (@{user.username})"
-        fwd_msg = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}** (ID: {user.id}):\n\n{user_text}"
+        fwd_msg = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
         try:
             await context.bot.send_message(
                 chat_id=target_chat_id,
