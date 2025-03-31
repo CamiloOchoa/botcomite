@@ -195,7 +195,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
             # /start sin payload
             logger.info(f"/start simple (sin payload) de {user.id}. Enviando saludo genérico.")
             await update.message.reply_text(
-                f"¡Hola {user.first_name}! Para enviar una consulta o sugerencia, por favor, usa los botones correspondientes en el grupo del Comité."
+                f"¡Hola {user.first_name}! Por favor, escribe ahora tu sugerencia en un único mensaje.\n - Recuerda que las sugerencias(consultas) solo las pueden ver los miembros del comité. \n - Recibirás una respuesta en la mayor brevedad posible."
             )
             context.user_data.clear()
             raise ApplicationHandlerStop
