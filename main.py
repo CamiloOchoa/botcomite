@@ -1,18 +1,18 @@
 import os
 import logging
 import re
-from telegram.ext import ApplicationHandlerStop
-from telegram.ext import ConversationHandler
+
+# --- Imports Limpios ---
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
-    CallbackContext,
+    CallbackContext, # Necesario para post_initial_buttons
     ConversationHandler,
     MessageHandler,
     filters,
     ContextTypes,
-    ApplicationHandlerStop # <-- IMPORTAR LA EXCEPCIÓN
+    ApplicationHandlerStop # Excepción para detener propagación
 )
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
@@ -22,7 +22,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("apscheduler").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING) # Opcional
 logger = logging.getLogger(__name__)
 
 # --- Estado para la Conversación ---
@@ -83,37 +83,24 @@ async def post_initial_buttons(context: CallbackContext) -> bool:
     mensaje_consulta = ("Pulsa el botón si tienes alguna consulta sobre algún tema que no se haya visto en el grupo(permisos, bolsa de horas, excedencias, etc...). Recuerda que estás consultas son privadas y solo pueden verlas los miembros del comité. La consulta debe ser enviada en un solo mensaje.")
     url_consulta = f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta"; kb_consulta = [[InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=url_consulta)]]; markup_consulta = InlineKeyboardMarkup(kb_consulta)
     try: await context.bot.send_message(chat_id=GRUPO_ID, message_thread_id=TEMA_BOTON_CONSULTAS_COMITE, text=mensaje_consulta, reply_markup=markup_consulta); logger.info(f"Msg botón 'Consulta' T:{TEMA_BOTON_CONSULTAS_COMITE}"); success_count += 1
-    except Exception as e: logger.error(f"Error enviando botón 'Consulta' T:{TEMA_BOTON_CONSULTAS_COMITE}: {e}", exc_info=isinstance(e, (ValueError, TypeError))) # Log traceback solo para errores inesperados
+    except Exception as e: logger.error(f"Error enviando botón 'Consulta' T:{TEMA_BOTON_CONSULTAS_COMITE}: {e}", exc_info=isinstance(e, (ValueError, TypeError)))
     mensaje_sugerencia = ("Pulsa el botón si tienes alguna sugerencia para mejorar el grupo o el funcionamiento del comité. Recuerda que estás sugerencias son privadas y solo pueden verlas los miembros del comité. La sugerencia debe ser enviada en un solo mensaje.")
     url_sugerencia = f"https://t.me/{BOT_USERNAME}?start=iniciar_sugerencia"; kb_sugerencia = [[InlineKeyboardButton("Iniciar Sugerencia 💡", url=url_sugerencia)]]; markup_sugerencia = InlineKeyboardMarkup(kb_sugerencia)
     try: await context.bot.send_message(chat_id=GRUPO_ID, message_thread_id=TEMA_BOTON_SUGERENCIAS_COMITE, text=mensaje_sugerencia, reply_markup=markup_sugerencia); logger.info(f"Msg botón 'Sugerencia' T:{TEMA_BOTON_SUGERENCIAS_COMITE}"); success_count += 1
     except Exception as e: logger.error(f"Error enviando botón 'Sugerencia' T:{TEMA_BOTON_SUGERENCIAS_COMITE}: {e}", exc_info=isinstance(e, (ValueError, TypeError)))
     return success_count > 0
 
+# --- Comando para Postear Botones (Privado) ---
 async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Comando /postbotones para publicar los mensajes con botones.
-    CUALQUIER usuario puede ejecutarlo en CHAT PRIVADO con el bot.
-    """
-    user = update.effective_user
-    chat = update.effective_chat
-
-    if not chat or chat.type != 'private':
-        logger.warning(f"/postbotones ignorado: no en privado (chat_id: {chat.id if chat else '?'}).")
-        return
-
+    """ Comando /postbotones para publicar/actualizar botones (uso privado). """
+    user = update.effective_user; chat = update.effective_chat
+    if not chat or chat.type != 'private': return
     logger.info(f"/postbotones recibido en privado de {user.id} ({user.full_name}). Ejecutando...")
-    await update.message.reply_text("Recibido. Intentando publicar/actualizar botones en los temas del grupo del comité...")
-    try:
-        success = await post_initial_buttons(context)
-        # ESTE ES EL IF/ELSE PROBABLEMENTE AFECTADO (CERCA DE L120)
-        if success: # <-- Verifica indentación de esta línea
-            await update.message.reply_text("✅ ¡Hecho! Los botones de consulta y sugerencia deberían estar publicados/actualizados en sus temas.") # <-- Verifica indentación
-        else: # <-- ¡EL ERROR APUNTA AQUÍ! Verifica indentación de esta línea
-             await update.message.reply_text("⚠️ Se intentó publicar los botones, pero ocurrió un error al enviar uno o ambos mensajes. Revisa los logs del bot.") # <-- Verifica indentación
-    except Exception as e: # <-- Verifica indentación
-        logger.error(f"Error inesperado durante post_initial_buttons llamado por {user.id}: {e}", exc_info=True) # <-- Verifica indentación
-        await update.message.reply_text("❌ Ocurrió un error inesperado al intentar publicar los botones.") # <-- Verifica indentación
+    await update.message.reply_text("Recibido. Intentando publicar/actualizar botones...")
+    try: success = await post_initial_buttons(context)
+    except Exception as e: logger.error(f"Excepción en post_initial_buttons llamado por {user.id}: {e}", exc_info=True); await update.message.reply_text("❌ Error inesperado."); return
+    if success: await update.message.reply_text("✅ ¡Hecho!")
+    else: await update.message.reply_text("⚠️ Error al enviar uno o ambos botones. Revisa logs.")
 
 # --- Handler para /start (Entrada a la Conversación) ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
@@ -130,25 +117,90 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
     elif chat and chat.type in ["group", "supergroup", "channel"]: logger.info(f"/start en {chat.type} {chat.id}. Ignorando."); return None
     return ConversationHandler.END # Default a terminar
 
-else:
-    # --- BLOQUE CORREGIDO ---
-    logger.error(f"Tipo acción desconocido '{action_type}' en receive_text {user.id}")
-    try:
-        await update.message.reply_text("Error interno.")
-    except Exception:
-        pass # Ignorar error al responder si falla
-    context.user_data.clear()
-    raise ApplicationHandlerStop # Detener por error
-    # --- FIN BLOQUE CORREGIDO ---
+# --- Handler para Recibir Texto (Consulta/Sugerencia) ---
+# --- ESTA ES LA ÚNICA DEFINICIÓN CORRECTA DE receive_text ---
+async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int: # Todavía declaramos que devuelve int
+    """
+    Recibe el texto en privado. Valida. Envía. Confirma.
+    Y detiene la propagación lanzando ApplicationHandlerStop.
+    """
+    user = update.effective_user
+    message = update.message
+    if not message or not message.text:
+        logger.warning(f"Update sin texto recibido en estado TYPING_REPLY de {user.id}. Ignorando.")
+        return TYPING_REPLY # No detener, mantener estado
+
+    user_text = message.text
+    action_type = context.user_data.pop('action_type', None)
+
+    if not action_type:
+        logger.warning(f"receive_text llamado sin action_type en user_data (pop) para {user.id}.")
+        raise ApplicationHandlerStop # Detener si no estábamos esperando esto
+
+    logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
+    found_forbidden_topic = None # Inicializar aquí
+
+    # Validación de Palabras Clave (SOLO para consultas)
+    if action_type == 'consulta':
+        text_lower = user_text.lower()
+        forbidden_keywords_map = { "bolsa de horas": "bolsa de horas", "permiso": "permisos", "permisos": "permisos", "incapacidad temporal": "incapacidad temporal", "baja": "incapacidad temporal", "excedencia": "excedencias", "excedencias": "excedencias" }
+        for keyword, topic_name in forbidden_keywords_map.items():
+            if keyword in text_lower: found_forbidden_topic = topic_name; break
+        if found_forbidden_topic:
+            logger.warning(f"Consulta de {user.id} rechazada: '{found_forbidden_topic}'")
+            error_message = (f"❌ Tu consulta sobre '{found_forbidden_topic}' no se procesa por aquí.\n\nConsulta info en grupo/docs. Si dudas específicas, replantea sin mencionar '{found_forbidden_topic}'.")
+            try: await update.message.reply_text(error_message)
+            except Exception as e_reply: logger.error(f"Error enviando msg rechazo a {user.id}: {e_reply}")
+            context.user_data.clear()
+            raise ApplicationHandlerStop # Detener tras rechazo
+
+    # Si NO fue rechazada por palabras clave, proceder a enviar
+    if not found_forbidden_topic:
+        target_chat_id = None
+        if action_type == 'consulta': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
+        elif action_type == 'sugerencia': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
+        else:
+            # Este bloque maneja el caso de action_type desconocido
+            logger.error(f"Tipo acción desconocido '{action_type}' en receive_text {user.id}")
+            try:
+                await update.message.reply_text("Error interno.")
+            except Exception:
+                pass # Ignorar error al responder si falla
+            context.user_data.clear()
+            raise ApplicationHandlerStop # Detener por error interno
+
+        if target_chat_id: # Solo si se asignó un destino válido
+            user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else ""); forward_message = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
+            send_success = False
+            try:
+                await context.bot.send_message(chat_id=target_chat_id, message_thread_id=target_thread_id, text=forward_message, parse_mode=ParseMode.MARKDOWN);
+                logger.info(f"{action_type.capitalize()} de {user_info} (ID:{user.id}) enviada a {target_chat_id}(T:{target_thread_id})");
+                send_success = True
+            except Exception as e:
+                logger.error(f"Error enviando {action_type} de {user.id}: {e}", exc_info=True)
+
+            if send_success:
+                try: await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada!"); logger.info(f"Confirmación enviada a {user.id}")
+                except Exception as e_confirm: logger.error(f"Error enviando confirmación a {user.id}: {e_confirm}")
+            else:
+                try: await update.message.reply_text(f"❌ Error al enviar tu {action_type}. Contacta admin.")
+                except Exception as e_fail_confirm: logger.error(f"Error enviando msg fallo a {user.id}: {e_fail_confirm}")
+
+            context.user_data.clear()
+            raise ApplicationHandlerStop # Detener tras procesar (éxito o fallo)
+
+    # Fallback por si se alcanza este punto inesperadamente (ej. consulta rechazada)
+    # El raise ApplicationHandlerStop ya se ejecutó si la consulta fue rechazada.
+    # Este punto no debería alcanzarse en operación normal si los raise anteriores funcionan.
+    logger.warning(f"receive_text alcanzando el final para {user.id} después de manejar {action_type}. Esto podría indicar un flujo no esperado.")
+    context.user_data.clear() # Asegurar limpieza
+    raise ApplicationHandlerStop # Detener por si acaso
 
 # --- Handler para /cancel (Fallback de la Conversación) ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """ Cancela la conversación activa. """
     user = update.effective_user; logger.info(f"Usuario {user.id} ({user.full_name}) canceló.")
-    # action_type ya fue eliminado por pop en receive_text si se envió algo.
-    # Aquí sólo necesitamos limpiar por si el usuario usa /cancel antes de enviar.
-    # Si queremos dar un mensaje diferente si estaba en la conversación vs no:
-    is_in_conversation = bool(context.user_data) # Comprobar si queda algo (aunque no debería ser action_type)
+    is_in_conversation = bool(context.user_data) # Comprobar si queda algo
     context.user_data.clear() # Limpiar de todos modos
     if is_in_conversation: await update.message.reply_text('Operación cancelada.')
     else: await update.message.reply_text('No hay operación activa para cancelar.')
