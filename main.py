@@ -158,7 +158,10 @@ async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # --- Handler para /start ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
-    """ Manejador del comando /start. Inicia la conversación si viene con payload. """
+    """
+    Manejador del comando /start.
+    Si viene con payload (iniciar_consulta o iniciar_sugerencia), se inicia el flujo.
+    """
     user = update.effective_user
     chat = update.effective_chat
     args = context.args
@@ -180,7 +183,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
                 context.user_data['action_type'] = action_type
                 prompt = f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje."
                 await update.message.reply_text(prompt)
-                raise ApplicationHandlerStop
+                # Se retorna el estado para que el primer mensaje se capture en receive_text
                 return TYPING_REPLY
             else:
                 logger.warning(f"Payload desconocido '{payload}' recibido de {user.id}. Ignorando.")
@@ -189,12 +192,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
                 raise ApplicationHandlerStop
                 return ConversationHandler.END
         else:
+            # /start sin payload
             logger.info(f"/start simple (sin payload) de {user.id}. Enviando saludo genérico.")
-            await update.message.reply_text(f"¡Hola {user.first_name}! Para enviar una consulta o sugerencia, por favor, usa los botones correspondientes en el grupo del Comité.")
+            await update.message.reply_text(
+                f"¡Hola {user.first_name}! Para enviar una consulta o sugerencia, por favor, usa los botones correspondientes en el grupo del Comité."
+            )
             context.user_data.clear()
             raise ApplicationHandlerStop
             return ConversationHandler.END
-
     elif chat:
         logger.info(f"/start ignorado en chat no privado ({chat.id}, tipo: {chat.type})")
     return None
@@ -202,8 +207,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
 # --- Handler para Recibir Texto (Consulta/Sugerencia) ---
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
-    Recibe el texto de la consulta/sugerencia en chat privado durante la conversación.
-    Valida (si es consulta), envía al grupo externo, confirma al usuario y finaliza la conversación.
+    Recibe el primer mensaje (consulta o sugerencia) en chat privado.
+    Se procesa, se envía al grupo externo y se termina la conversación.
     """
     user = update.effective_user
     message = update.message
@@ -228,7 +233,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     logger.info(f"Procesando '{action_type}' de {user.id}. Texto: {user_text[:50]}...")
 
-    # Validación para consultas (sólo para consultas)
+    # Validación para consultas (solo aplica para consultas)
     if action_type == 'consulta':
         text_lower = user_text.lower()
         forbidden_map = {
@@ -253,7 +258,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 raise ApplicationHandlerStop
                 return ConversationHandler.END
 
-    # Determinar destino según acción
+    # Determinar destino según la acción
     if action_type == 'consulta':
         target_chat_id = GRUPO_EXTERNO_ID
         target_thread_id = TEMA_CONSULTAS_EXTERNO
@@ -300,11 +305,13 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             except Exception:
                 pass
     else:
-         logger.error(f"Destino inválido para {action_type} de {user.id}.")
-         try:
+        logger.error(f"Destino inválido para {action_type} de {user.id}.")
+        try:
             await update.message.reply_text("❌ Error interno: destino no válido.")
-         except Exception:
+        except Exception:
             pass
+
+    # Se termina la conversación después del primer mensaje válido.
     raise ApplicationHandlerStop
     return ConversationHandler.END
 
@@ -332,22 +339,21 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # --- Handler para Mensajes Inesperados ---
 async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Si se recibe un mensaje fuera de una conversación activa, informa al usuario
-    que las consultas y sugerencias deben realizarse a través de sus secciones,
-    mostrando botones que redirigen a ellas.
+    Si se recibe un mensaje fuera de una conversación activa (o tras haber enviado la consulta/sugerencia),
+    se informa al usuario que para enviar una nueva consulta o sugerencia debe pulsar el botón correspondiente.
     """
     user = update.effective_user
     chat = update.effective_chat
 
-    # Procesar sólo en chat privado y si hay texto
+    # Procesamos solo en chat privado y si hay texto
     if not chat or chat.type != 'private' or not update.message or not update.message.text:
         return
 
-    # Si ya existe un 'action_type' en curso, no hacemos nada
+    # Si se encuentra 'action_type' activo, es parte de la conversación; no se actúa.
     if 'action_type' in context.user_data:
         return
 
-    # Botones para redirigir a Consulta y Sugerencia
+    # Enviar mensaje informativo con botones para reiniciar el flujo.
     url_consulta = f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta"
     url_sugerencia = f"https://t.me/{BOT_USERNAME}?start=iniciar_sugerencia"
     keyboard = [
@@ -356,8 +362,8 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     mensaje = (
-        "⚠️ Para enviar una consulta o sugerencia, debes hacerlo a través de las secciones correspondientes.\n\n"
-        "Utiliza los botones de abajo para iniciar la acción que deseas realizar."
+        "⚠️ Ya has enviado tu consulta o sugerencia.\n\n"
+        "Si deseas enviar otra, por favor, pulsa uno de los botones para iniciar un nuevo ciclo."
     )
     try:
         await update.message.reply_text(mensaje, reply_markup=reply_markup)
@@ -409,4 +415,3 @@ if __name__ == '__main__':
         main()
     except Exception as e:
         logger.critical(f"Error fatal durante la inicialización del bot: {e}", exc_info=True)
-
