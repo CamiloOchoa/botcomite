@@ -223,11 +223,19 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     user_text = message.text
     action_type = context.user_data.pop('action_type', None)
     if not action_type:
-        logger.error(f"receive_text ejecutado para {user.id} pero 'action_type' no encontrado en user_data. Terminando conversación.")
+        # Se reemplaza el mensaje de error por uno que invite a reiniciar el flujo mediante botones.
+        keyboard = [
+            [InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta")],
+            [InlineKeyboardButton("Iniciar Sugerencia 💡", url=f"https://t.me/{BOT_USERNAME}?start=iniciar_sugerencia")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         try:
-            await update.message.reply_text("Ha ocurrido un error inesperado. Por favor, intenta iniciar de nuevo usando los botones del grupo.")
+            await update.message.reply_text(
+                "Si quieres hacer otra consulta o sugerencia, presiona los botones que hay a continuación:",
+                reply_markup=reply_markup
+            )
         except Exception as e:
-            logger.error(f"Error enviando mensaje de error (Acción desconocida) a {user.id}: {e}")
+            logger.error(f"Error enviando mensaje de reinicio a {user.id}: {e}")
         raise ApplicationHandlerStop
         return ConversationHandler.END
 
