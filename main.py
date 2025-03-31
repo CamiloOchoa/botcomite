@@ -157,7 +157,6 @@ async def post_initial_buttons(context: CallbackContext) -> bool:
         logger.error(f"Error inesperado enviando botón 'Sugerencia': {e}", exc_info=True)
 
     # Devolver True si al menos uno se envió (o si ambos lo hicieron)
-    # Podrías cambiarlo a `return success_count == 2` si quieres éxito total
     return success_count > 0
 
 # --- Comando para Postear Botones (Privado, sin check de admin) ---
@@ -198,51 +197,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
     chat = update.effective_chat
     args = context.args # Payload del deep link
 
-    # Log detallado
     start_context = f"chat {chat.id} ({chat.type})" if chat else "chat desconocido"
     logger.info(f"Comando /start de {user.id} ({user.full_name}) en {start_context}. Args: {args}")
 
-    # Caso 1: Privado y con payload (desde botón URL)
     if chat and chat.type == "private" and args:
         payload = args[0]
         action_type = None
-        if payload == "iniciar_consulta":
-            action_type = "consulta"
-        elif payload == "iniciar_sugerencia":
-            action_type = "sugerencia"
-
+        if payload == "iniciar_consulta": action_type = "consulta"
+        elif payload == "iniciar_sugerencia": action_type = "sugerencia"
         if action_type:
-            # Limpiar posible estado anterior por si acaso (reentrada)
-            context.user_data.clear()
-            logger.info(f"Payload '{payload}' válido de {user.id}. Iniciando flujo de {action_type}.")
-            context.user_data['action_type'] = action_type # Guardar qué se está haciendo
+            context.user_data.clear(); logger.info(f"Payload '{payload}' válido de {user.id}. Iniciando flujo de {action_type}.")
+            context.user_data['action_type'] = action_type
             prompt_message = f"¡Hola {user.first_name}! Has iniciado el proceso para enviar una {action_type}.\n\nPor favor, escribe tu mensaje ahora en un único texto."
-            await update.message.reply_text(prompt_message)
-            return TYPING_REPLY # Pasar al estado de espera de texto
-        else:
-            # Payload desconocido
-            logger.warning(f"Payload desconocido '{payload}' recibido de {user.id}.")
-            await update.message.reply_text("Parece que has usado un enlace inválido o caducado. Si querías enviar algo, por favor, vuelve al grupo del comité y usa el botón correcto.")
-            context.user_data.clear()
-            return ConversationHandler.END # No iniciar conversación
-
-    # Caso 2: Privado y SIN payload
-    elif chat and chat.type == "private":
-        logger.info(f"/start simple recibido en privado de {user.id}.")
-        await update.message.reply_text(f"¡Hola {user.first_name}! Soy el bot del comité.\nPara enviar consultas o sugerencias, por favor, usa los botones dedicados en los temas correspondientes del grupo del comité.")
-        context.user_data.clear() # Asegurarse de limpiar por si acaso
-        return ConversationHandler.END # No iniciar conversación
-
-    # Caso 3: En grupo o canal
-    elif chat and chat.type in ["group", "supergroup", "channel"]:
-         logger.info(f"/start recibido en {chat.type} {chat.id}. Ignorando.")
-         # No enviar mensaje para no ensuciar el grupo
-         return None # No es parte de la conversación
-
-    # Otros casos (raro)
+            await update.message.reply_text(prompt_message); return TYPING_REPLY
+        else: logger.warning(f"Payload desconocido '{payload}' recibido de {user.id}."); await update.message.reply_text("Enlace inválido o caducado."); context.user_data.clear(); return ConversationHandler.END
+    elif chat and chat.type == "private": logger.info(f"/start simple recibido en privado de {user.id}."); await update.message.reply_text(f"¡Hola {user.first_name}! Usa los botones del grupo."); context.user_data.clear(); return ConversationHandler.END
+    elif chat and chat.type in ["group", "supergroup", "channel"]: logger.info(f"/start recibido en {chat.type} {chat.id}. Ignorando."); return None
     return ConversationHandler.END
 
-# --- MODIFICADO: receive_text para inicializar found_forbidden_topic ---
+# --- Handler para Recibir Texto (Consulta/Sugerencia) ---
+# --- ESTA ES LA ÚNICA DEFINICIÓN CORRECTA DE receive_text ---
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Recibe el texto en privado. Valida. Envía. Confirma.
@@ -259,14 +233,15 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     if not action_type:
         logger.warning(f"receive_text llamado sin action_type en user_data (pop) para {user.id}.")
-        try: context.application.stop_propagation()
+        try:
+             if context.application: context.application.stop_propagation()
         except Exception: pass
         return ConversationHandler.END
 
     logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
 
     should_stop_propagation = False
-    found_forbidden_topic = None # <--- !!! INICIALIZAR AQUÍ !!!
+    found_forbidden_topic = None # Inicializar aquí
 
     # --- Validación de Palabras Clave (SOLO para consultas) ---
     if action_type == 'consulta':
@@ -277,11 +252,8 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             "baja": "incapacidad temporal", "excedencia": "excedencias",
             "excedencias": "excedencias"
         }
-        # 'found_forbidden_topic' ya está inicializado a None
         for keyword, topic_name in forbidden_keywords_map.items():
-            if keyword in text_lower:
-                found_forbidden_topic = topic_name # Se actualiza si se encuentra
-                break
+            if keyword in text_lower: found_forbidden_topic = topic_name; break
         if found_forbidden_topic:
             logger.warning(f"Consulta de {user.id} rechazada: '{found_forbidden_topic}'")
             error_message = (f"❌ Tu consulta sobre '{found_forbidden_topic}' no se procesa por aquí.\n\nConsulta la info en el grupo/documentación. Si tienes dudas específicas no resueltas, replantea sin mencionar '{found_forbidden_topic}'.")
@@ -290,9 +262,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             should_stop_propagation = True
     # --- Fin Validación ---
 
-    # Ahora 'found_forbidden_topic' SIEMPRE existe (será None si no es consulta o si no se encontró keyword)
     if not found_forbidden_topic:
-        # Determinar destino EXTERNO
         target_chat_id = None
         if action_type == 'consulta': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
         elif action_type == 'sugerencia': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
@@ -303,7 +273,6 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
              should_stop_propagation = True
 
         if target_chat_id:
-            # Formatear y enviar
             user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else "")
             forward_message = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
             send_success = False
@@ -314,7 +283,6 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             except TelegramError as e: logger.error(f"Error TG enviando {action_type} de {user.id}: {e}")
             except Exception as e: logger.error(f"Error Inesperado enviando {action_type} de {user.id}: {e}", exc_info=True)
 
-            # Confirmar al usuario
             if send_success:
                 try: await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias."); logger.info(f"Confirmación enviada en privado a {user.id}")
                 except Exception as e_confirm: logger.error(f"Error enviando confirmación a {user.id}: {e_confirm}")
@@ -339,113 +307,16 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     return ConversationHandler.END
 
-    logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
-
-    # --- Validación de Palabras Clave (SOLO para consultas) ---
-    if action_type == 'consulta':
-        # ... (Bloque de validación de palabras clave SIN CAMBIOS) ...
-        text_lower = user_text.lower()
-        forbidden_keywords_map = {
-            "bolsa de horas": "bolsa de horas", "permiso": "permisos",
-            "permisos": "permisos", "incapacidad temporal": "incapacidad temporal",
-            "baja": "incapacidad temporal", "excedencia": "excedencias",
-            "excedencias": "excedencias"
-        }
-        found_forbidden_topic = None
-        for keyword, topic_name in forbidden_keywords_map.items():
-            if keyword in text_lower: found_forbidden_topic = topic_name; break
-        if found_forbidden_topic:
-            logger.warning(f"Consulta de {user.id} rechazada: '{found_forbidden_topic}'")
-            error_message = (f"❌ Tu consulta sobre '{found_forbidden_topic}' no se procesa por aquí.\n\nConsulta la info en el grupo/documentación. Si tienes dudas específicas no resueltas, replantea sin mencionar '{found_forbidden_topic}'.")
-            try:
-                 await update.message.reply_text(error_message)
-            except Exception as e_reply:
-                 logger.error(f"Error enviando msg rechazo a {user.id}: {e_reply}")
-            # context.user_data ya se limpió con pop
-            return ConversationHandler.END
-    # --- Fin Validación ---
-
-    # Determinar destino EXTERNO
-    if action_type == 'consulta': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
-    elif action_type == 'sugerencia': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
-    else: logger.error(f"Tipo acción desconocido '{action_type}' en receive_text {user.id}"); await update.message.reply_text("Error interno."); return ConversationHandler.END # Limpiar user_data no es necesario (se hizo con pop)
-
-    # Formatear y enviar
-    user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else "")
-    forward_message = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
-    send_success = False
-    try:
-        await context.bot.send_message(chat_id=target_chat_id, message_thread_id=target_thread_id, text=forward_message, parse_mode=ParseMode.MARKDOWN)
-        logger.info(f"{action_type.capitalize()} de {user_info} (ID: {user.id}) enviada a {target_chat_id} (T:{target_thread_id})")
-        send_success = True
-    except TelegramError as e: logger.error(f"Error TG enviando {action_type} de {user.id}: {e}")
-    except Exception as e: logger.error(f"Error Inesperado enviando {action_type} de {user.id}: {e}", exc_info=True)
-
-    # Confirmar al usuario DESPUÉS de intentar enviar
-    if send_success:
-        try:
-            await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias.")
-            logger.info(f"Confirmación enviada en privado a {user.id}")
-        except Exception as e_confirm:
-             logger.error(f"Error enviando confirmación a {user.id}: {e_confirm}")
-    else:
-        try:
-            await update.message.reply_text(f"❌ Hubo un error al enviar tu {action_type} al grupo externo. Por favor, contacta a un administrador.")
-        except Exception as e_fail_confirm:
-             logger.error(f"Error enviando msg de fallo a {user.id}: {e_fail_confirm}")
-
-
-    # Asegurarse de que user_data esté limpio (aunque pop ya lo hizo)
-    context.user_data.clear()
-
-    # Indicar que la conversación ha terminado definitivamente para este update
-    return ConversationHandler.END
-    # --- Fin Validación ---
-
-    # Determinar destino EXTERNO
-    if action_type == 'consulta':
-        target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
-    elif action_type == 'sugerencia':
-        target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
-    else:
-        logger.error(f"Tipo acción desconocido '{action_type}' en receive_text {user.id}"); await update.message.reply_text("Error interno."); context.user_data.clear(); return ConversationHandler.END
-
-    # Formatear mensaje para el grupo externo (sin ID)
-    user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else "")
-    forward_message = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
-
-    try:
-        await context.bot.send_message(
-            chat_id=target_chat_id, message_thread_id=target_thread_id,
-            text=forward_message, parse_mode=ParseMode.MARKDOWN
-        )
-        logger.info(f"{action_type.capitalize()} de {user_info} (ID: {user.id}) enviada a {target_chat_id} (T:{target_thread_id})")
-        await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias.")
-        logger.info(f"Confirmación enviada en privado a {user.id}")
-    except TelegramError as e:
-        logger.error(f"Error de Telegram enviando la {action_type} de {user.id} al grupo externo: {e}")
-        await update.message.reply_text(f"❌ Hubo un error al enviar tu {action_type} al grupo externo ({e}). Por favor, contacta a un administrador si el problema persiste.")
-    except Exception as e:
-        logger.error(f"Error inesperado enviando la {action_type} de {user.id}: {e}", exc_info=True)
-        await update.message.reply_text(f"❌ Hubo un error inesperado al enviar tu {action_type}. Por favor, contacta a un administrador.")
-
-    finally:
-        context.user_data.clear() # Limpiar siempre al finalizar
-        return ConversationHandler.END # Terminar la conversación
-
 # --- Handler para /cancel (Fallback de la Conversación) ---
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancela la conversación activa."""
     user = update.effective_user
     logger.info(f"Usuario {user.id} ({user.full_name}) canceló la conversación.")
-    # Verificar si realmente estaba en una conversación
-    if context.user_data.get('action_type'):
-        await update.message.reply_text('Operación cancelada. Puedes iniciar una nueva desde el grupo del comité si lo deseas.')
+    if 'action_type' in context.user_data: # Comprobar si estaba en la conversación
+        await update.message.reply_text('Operación cancelada. Puedes iniciar una nueva desde el grupo del comité.')
     else:
-        # Si no estaba en la conversación, simplemente saludar
          await update.message.reply_text('No hay ninguna operación activa para cancelar. Usa los botones del grupo para iniciar.')
-
-    context.user_data.clear() # Limpiar en cualquier caso
+    context.user_data.clear()
     return ConversationHandler.END
 
 # --- Handler para Mensajes Inesperados en Privado ---
@@ -453,38 +324,25 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
     """Responde a mensajes de texto inesperados en privado."""
     user = update.effective_user
     chat = update.effective_chat
-
-    # Doble check por si acaso, aunque el filtro ya lo hace
     if not chat or chat.type != 'private': return
-    if not update.message or not update.message.text: return # Ignorar si no es texto
+    if not update.message or not update.message.text: return
 
     logger.info(f"Mensaje inesperado de {user.id} en privado: {update.message.text[:50]}...")
-
     if not GRUPO_ID or GRUPO_ID >= 0:
-        logger.error("handle_unexpected_message: GRUPO_ID inválido para generar enlaces.")
-        await update.message.reply_text("Lo siento, no entiendo. Usa los botones en el grupo del comité para enviar consultas/sugerencias.")
+        logger.error("handle_unexpected_message: GRUPO_ID inválido para enlaces.")
+        await update.message.reply_text("Usa los botones en el grupo del comité.")
         return
-
     try:
         short_group_id = str(GRUPO_ID).replace("-100", "", 1)
         url_tema_consultas = f"https://t.me/c/{short_group_id}/{TEMA_BOTON_CONSULTAS_COMITE}"
         url_tema_sugerencias = f"https://t.me/c/{short_group_id}/{TEMA_BOTON_SUGERENCIAS_COMITE}"
-
-        texto_respuesta = (
-            "Hola 👋 Parece que has escrito directamente en el chat. \n\n"
-            "Para enviar una consulta o una sugerencia, por favor, utiliza los botones dedicados "
-            "que se encuentran en los siguientes temas del grupo del comité:"
-        )
-        keyboard = [
-            [InlineKeyboardButton("Ir a Consultas 🤔", url=url_tema_consultas)],
-            [InlineKeyboardButton("Ir a Sugerencias ✨", url=url_tema_sugerencias)]
-        ]
+        texto_respuesta = ("Hola 👋 Parece que has escrito directamente.\n\nPara enviar una consulta o sugerencia, usa los botones dedicados en los temas del grupo comité:")
+        keyboard = [[InlineKeyboardButton("Ir a Consultas 🤔", url=url_tema_consultas)], [InlineKeyboardButton("Ir a Sugerencias ✨", url=url_tema_sugerencias)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.message.reply_text(texto_respuesta, reply_markup=reply_markup)
-
     except Exception as e:
         logger.error(f"Error al generar respuesta inesperada para {user.id}: {e}", exc_info=True)
-        await update.message.reply_text("Lo siento, no entiendo. Usa los botones en el grupo del comité.")
+        await update.message.reply_text("Usa los botones en el grupo del comité.")
 
 
 # --- Configuración y Ejecución Principal ---
@@ -492,40 +350,21 @@ def main() -> None:
     """Configura y ejecuta el bot."""
     if not validar_variables():
        logger.critical("--- BOT DETENIDO DEBIDO A ERRORES DE CONFIGURACIÓN ---")
-       return # Detener si la validación falla
+       return
 
     application = Application.builder().token(TOKEN).build()
 
-    # --- Conversation Handler ---
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start, filters=filters.ChatType.PRIVATE)],
-        states={
-            TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)]
-        },
-        fallbacks=[
-            CommandHandler('cancel', cancel, filters=filters.ChatType.PRIVATE),
-            CommandHandler('start', start, filters=filters.ChatType.PRIVATE) # Permite reiniciar con /start
-        ],
-        allow_reentry=True, # Importante para que /start funcione como reinicio
-        per_user=True,
-        per_chat=True, # Estado ligado al chat privado
+        states={TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)]},
+        fallbacks=[CommandHandler('cancel', cancel, filters=filters.ChatType.PRIVATE), CommandHandler('start', start, filters=filters.ChatType.PRIVATE)],
+        allow_reentry=True, per_user=True, per_chat=True,
     )
 
     # --- Registro de Handlers por Prioridad ---
-    # Grupo 0: Conversación (máxima prioridad para mensajes relevantes)
-    application.add_handler(conv_handler, group=0)
-
-    # Grupo 1: Comandos específicos fuera de la conversación
-    application.add_handler(CommandHandler("postbotones", post_buttons_command, filters=filters.ChatType.PRIVATE), group=1)
-    # Aquí irían otros comandos como /help, etc. si los hubiera
-
-    # Grupo 2: Mensajes de texto genéricos en privado (fallback)
-    application.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND,
-        handle_unexpected_message
-    ), group=2)
-
-    # Ya no se necesita un handler genérico para /start en grupos
+    application.add_handler(conv_handler, group=0) # Conversación primero
+    application.add_handler(CommandHandler("postbotones", post_buttons_command, filters=filters.ChatType.PRIVATE), group=1) # Comandos específicos después
+    application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_unexpected_message), group=2) # Mensajes inesperados al final
 
     logger.info("--- Iniciando Polling del Bot ---")
     try:
@@ -535,10 +374,8 @@ def main() -> None:
     finally:
         logger.info("--- Bot Detenido ---")
 
-
 if __name__ == '__main__':
     try:
         main()
     except Exception as e:
-        # Captura errores fatales que puedan ocurrir ANTES de iniciar el polling
         logger.critical(f"Error fatal al inicializar el bot: {e}", exc_info=True)
