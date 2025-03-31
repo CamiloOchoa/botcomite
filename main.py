@@ -242,7 +242,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
     # Otros casos (raro)
     return ConversationHandler.END
 
-# --- MODIFICADO: receive_text para detener explícitamente la propagación ---
+# --- MODIFICADO: receive_text para inicializar found_forbidden_topic ---
 async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """
     Recibe el texto en privado. Valida. Envía. Confirma.
@@ -252,22 +252,21 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     message = update.message
     if not message or not message.text:
         logger.warning(f"Update sin texto recibido en estado TYPING_REPLY de {user.id}. Ignorando.")
-        # No detener propagación aquí, podría ser otro tipo de update que SÍ deba manejarse
-        return TYPING_REPLY # Permanecer en el mismo estado
+        return TYPING_REPLY
 
     user_text = message.text
-    # Usar pop para obtener Y eliminar el estado
     action_type = context.user_data.pop('action_type', None)
 
-    # Si no había action_type, la conversación ya había terminado o nunca empezó en este estado.
-    # No deberíamos estar aquí, pero si llegamos, terminamos sin hacer nada más.
     if not action_type:
         logger.warning(f"receive_text llamado sin action_type en user_data (pop) para {user.id}.")
+        try: context.application.stop_propagation()
+        except Exception: pass
         return ConversationHandler.END
 
     logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
 
-    should_stop_propagation = False # Bandera para saber si debemos detener la propagación
+    should_stop_propagation = False
+    found_forbidden_topic = None # <--- !!! INICIALIZAR AQUÍ !!!
 
     # --- Validación de Palabras Clave (SOLO para consultas) ---
     if action_type == 'consulta':
@@ -278,34 +277,32 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             "baja": "incapacidad temporal", "excedencia": "excedencias",
             "excedencias": "excedencias"
         }
-        found_forbidden_topic = None
+        # 'found_forbidden_topic' ya está inicializado a None
         for keyword, topic_name in forbidden_keywords_map.items():
-            if keyword in text_lower: found_forbidden_topic = topic_name; break
+            if keyword in text_lower:
+                found_forbidden_topic = topic_name # Se actualiza si se encuentra
+                break
         if found_forbidden_topic:
             logger.warning(f"Consulta de {user.id} rechazada: '{found_forbidden_topic}'")
             error_message = (f"❌ Tu consulta sobre '{found_forbidden_topic}' no se procesa por aquí.\n\nConsulta la info en el grupo/documentación. Si tienes dudas específicas no resueltas, replantea sin mencionar '{found_forbidden_topic}'.")
             try: await update.message.reply_text(error_message)
             except Exception as e_reply: logger.error(f"Error enviando msg rechazo a {user.id}: {e_reply}")
-            should_stop_propagation = True # Sí, manejamos este mensaje, detener propagación
-            # context.user_data ya se limpió con pop
-            # return ConversationHandler.END # Retornaremos al final después de detener propagación
+            should_stop_propagation = True
     # --- Fin Validación ---
 
-    # Si NO fue rechazada por palabras clave, proceder a enviar
+    # Ahora 'found_forbidden_topic' SIEMPRE existe (será None si no es consulta o si no se encontró keyword)
     if not found_forbidden_topic:
         # Determinar destino EXTERNO
+        target_chat_id = None
         if action_type == 'consulta': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_CONSULTAS_EXTERNO
         elif action_type == 'sugerencia': target_chat_id = GRUPO_EXTERNO_ID; target_thread_id = TEMA_SUGERENCIAS_EXTERNO
         else:
-             # Este caso realmente no debería ocurrir si el pop inicial funcionó
              logger.error(f"Tipo acción desconocido '{action_type}' en receive_text {user.id}");
              try: await update.message.reply_text("Error interno.");
              except Exception: pass
-             should_stop_propagation = True # Hubo un error, pero lo manejamos aquí
-             # return ConversationHandler.END
+             should_stop_propagation = True
 
-        # Si tenemos un destino válido
-        if 'target_chat_id' in locals():
+        if target_chat_id:
             # Formatear y enviar
             user_info = f"{user.full_name}" + (f" (@{user.username})" if user.username else "")
             forward_message = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
@@ -317,7 +314,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             except TelegramError as e: logger.error(f"Error TG enviando {action_type} de {user.id}: {e}")
             except Exception as e: logger.error(f"Error Inesperado enviando {action_type} de {user.id}: {e}", exc_info=True)
 
-            # Confirmar al usuario DESPUÉS de intentar enviar
+            # Confirmar al usuario
             if send_success:
                 try: await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias."); logger.info(f"Confirmación enviada en privado a {user.id}")
                 except Exception as e_confirm: logger.error(f"Error enviando confirmación a {user.id}: {e_confirm}")
@@ -325,22 +322,21 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 try: await update.message.reply_text(f"❌ Hubo un error al enviar tu {action_type} al grupo externo. Por favor, contacta a un administrador.")
                 except Exception as e_fail_confirm: logger.error(f"Error enviando msg de fallo a {user.id}: {e_fail_confirm}")
 
-            should_stop_propagation = True # Sí, manejamos este mensaje (con éxito o fallo), detener propagación
-            # return ConversationHandler.END # Retornaremos al final
+            should_stop_propagation = True
 
     # --- Finalización ---
-    # Limpiar user_data restante si no se hizo con pop (aunque no debería ser necesario)
     context.user_data.clear()
 
-    # Detener la propagación SIEMPRE que este handler haya procesado el mensaje
     if should_stop_propagation:
         try:
-            context.application.stop_propagation()
-            logger.debug(f"Propagation stopped for update {update.update_id} after receive_text processing.")
+            if context.application:
+                 context.application.stop_propagation()
+                 logger.debug(f"Propagation stopped for update {update.update_id} after receive_text processing.")
+            else:
+                 logger.warning("context.application is None, cannot stop propagation.")
         except Exception as e_stop:
             logger.error(f"Error calling stop_propagation: {e_stop}")
 
-    # Terminar la conversación
     return ConversationHandler.END
 
     logger.info(f"Procesando texto de {user.id} para '{action_type}': {user_text[:100]}...")
