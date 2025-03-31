@@ -1,9 +1,0 @@
-TOKEN = "7586734778:AAGB_F2I6KjErkNH6M8WZO9dzEdVwmo970c"
-GRUPO_ID = -1002261336942
-TEMA_ID = 124
-# URL_TEMA corresponde al enlace a un tema específico, que en este caso se usa para otros fines.
-URL_TEMA = f"https://t.me/c/{str(GRUPO_ID)[4:]}/{TEMA_ID}"
-# GROUP_LINK es el enlace al grupo, donde se visualizan todos los temas (Comunicados, Información, Documentación)
-GROUP_LINK = "https://t.me/+NnCfkbQ0o2kzZTJk"  # Reemplaza con el enlace público de tu grupo
-
-BOT_USERNAME = "ComitePolobot"  # Reemplaza con el nombre de usuario de tu bot
