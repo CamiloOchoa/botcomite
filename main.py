@@ -181,7 +181,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
                 context.user_data.clear()
                 logger.info(f"Payload '{payload}' válido recibido de {user.id}. Iniciando flujo para '{action_type}'.")
                 context.user_data['action_type'] = action_type
-                prompt = f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje.\n - Recuerda que la {action_type} solo la pueden ver los miembros del comité. \n - Recibirás una respuesta en la mayor brevedad posible."
+                prompt = f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje."
+                # Si es sugerencia, se muestra el mensaje actualizado:
+                if action_type == "sugerencia":
+                    prompt = (
+                        "Hola usuario, por favor, escribe ahora tu sugerencia en un único mensaje.\n"
+                        "- Recuerda que las sugerencias (consultas) solo las pueden ver los miembros del comité.\n"
+                        "- Recibirás una respuesta en la mayor brevedad posible."
+                    )
                 await update.message.reply_text(prompt)
                 # Se retorna el estado para que el primer mensaje se capture en receive_text
                 return TYPING_REPLY
@@ -195,7 +202,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
             # /start sin payload
             logger.info(f"/start simple (sin payload) de {user.id}. Enviando saludo genérico.")
             await update.message.reply_text(
-                f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje.\n - Recuerda que la {action_type} solo la pueden ver los miembros del comité. \n - Recibirás una respuesta en la mayor brevedad posible."
+                f"¡Hola {user.first_name}! Para enviar una consulta o sugerencia, por favor, usa los botones correspondientes en el grupo del Comité."
             )
             context.user_data.clear()
             raise ApplicationHandlerStop
@@ -240,6 +247,21 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return ConversationHandler.END
 
     logger.info(f"Procesando '{action_type}' de {user.id}. Texto: {user_text[:50]}...")
+
+    # Validación: El mensaje debe tener al menos 30 caracteres
+    if len(user_text.strip()) < 30:
+        url = f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta" if action_type == "consulta" else f"https://t.me/{BOT_USERNAME}?start=iniciar_sugerencia"
+        kb = [[InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=url)]] if action_type == "consulta" else [[InlineKeyboardButton("Iniciar Sugerencia 💡", url=url)]]
+        reply_markup = InlineKeyboardMarkup(kb)
+        try:
+            await update.message.reply_text(
+                "Mensaje demasiado corto, el mensaje no ha sido enviado. Inicia una nueva consulta/sugerencia presionando el siguiente botón.",
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Error enviando mensaje de longitud insuficiente a {user.id}: {e}")
+        raise ApplicationHandlerStop
+        return ConversationHandler.END
 
     # Validación para consultas (solo aplica para consultas)
     if action_type == 'consulta':
@@ -286,7 +308,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         user_info = user.full_name
         if user.username:
             user_info += f" (@{user.username})"
-        fwd_msg = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
+        fwd_msg = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}** (ID: {user.id}):\n\n{user_text}"
         try:
             await context.bot.send_message(
                 chat_id=target_chat_id,
