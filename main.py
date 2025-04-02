@@ -36,6 +36,11 @@ GRUPO_EXTERNO_ID = -1002433074372  # ID del chat donde se envían las consultas/
 TEMA_CONSULTAS_EXTERNO = 69         # ID del tema para consultas en el grupo externo
 TEMA_SUGERENCIAS_EXTERNO = 71       # ID del tema para sugerencias en el grupo externo
 
+# --- Función Auxiliar para obtener el short group id ---
+def get_short_group_id() -> str:
+    """Convierte el ID del grupo externo al formato de enlace de mensajes."""
+    return str(GRUPO_EXTERNO_ID).replace("-100", "", 1)
+
 # --- Validación de Variables de Entorno ---
 def validar_variables():
     """Valida las variables de entorno necesarias."""
@@ -182,7 +187,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | Non
                 logger.info(f"Payload '{payload}' válido recibido de {user.id}. Iniciando flujo para '{action_type}'.")
                 context.user_data['action_type'] = action_type
                 prompt = f"¡Hola {user.first_name}! Por favor, escribe ahora tu {action_type} en un único mensaje."
-                # Si es sugerencia, se muestra el mensaje actualizado:
                 if action_type == "sugerencia":
                     prompt = (
                         "Hola usuario, por favor, escribe ahora tu sugerencia en un único mensaje.\n"
@@ -232,8 +236,8 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     if not action_type:
         # Se reemplaza el mensaje de error por uno que invite a reiniciar el flujo mediante botones.
         keyboard = [
-            [InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta")],
-            [InlineKeyboardButton("Iniciar Sugerencia 💡", url=f"https://t.me/{BOT_USERNAME}?start=iniciar_sugerencia")]
+            [InlineKeyboardButton("Ir al tema de Consulta", url=f"https://t.me/c/{get_short_group_id()}/{TEMA_CONSULTAS_EXTERNO}")],
+            [InlineKeyboardButton("Ir al tema de Sugerencia", url=f"https://t.me/c/{get_short_group_id()}/{TEMA_SUGERENCIAS_EXTERNO}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
@@ -250,14 +254,16 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
     # Validación: El mensaje debe tener al menos 30 caracteres
     if len(user_text.strip()) < 30:
-        url = f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta" if action_type == "consulta" else f"https://t.me/{BOT_USERNAME}?start=iniciar_sugerencia"
-        kb = [[InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=url)]] if action_type == "consulta" else [[InlineKeyboardButton("Iniciar Sugerencia 💡", url=url)]]
-        reply_markup = InlineKeyboardMarkup(kb)
+        # Dependiendo de la acción se muestra el error adecuado y se redirige al tema
+        if action_type == "consulta":
+            error_text = "Mensaje demasiado corto, el mensaje no ha sido enviado. Inicia una nueva consulta presionando el siguiente botón."
+            button = InlineKeyboardButton("Ir al tema de Consulta", url=f"https://t.me/c/{get_short_group_id()}/{TEMA_CONSULTAS_EXTERNO}")
+        else:
+            error_text = "Mensaje demasiado corto, el mensaje no ha sido enviado. Inicia una nueva sugerencia presionando el siguiente botón."
+            button = InlineKeyboardButton("Ir al tema de Sugerencia", url=f"https://t.me/c/{get_short_group_id()}/{TEMA_SUGERENCIAS_EXTERNO}")
+        reply_markup = InlineKeyboardMarkup([[button]])
         try:
-            await update.message.reply_text(
-                "Mensaje demasiado corto, el mensaje no ha sido enviado. Inicia una nueva consulta/sugerencia presionando el siguiente botón.",
-                reply_markup=reply_markup
-            )
+            await update.message.reply_text(error_text, reply_markup=reply_markup)
         except Exception as e:
             logger.error(f"Error enviando mensaje de longitud insuficiente a {user.id}: {e}")
         raise ApplicationHandlerStop
@@ -371,6 +377,7 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
     """
     Si se recibe un mensaje fuera de una conversación activa (o tras haber enviado la consulta/sugerencia),
     se informa al usuario que para enviar una nueva consulta o sugerencia debe pulsar el botón correspondiente.
+    Los botones redirigen al tema correspondiente.
     """
     user = update.effective_user
     chat = update.effective_chat
@@ -383,12 +390,10 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
     if 'action_type' in context.user_data:
         return
 
-    # Enviar mensaje informativo con botones para reiniciar el flujo.
-    url_consulta = f"https://t.me/{BOT_USERNAME}?start=iniciar_consulta"
-    url_sugerencia = f"https://t.me/{BOT_USERNAME}?start=iniciar_sugerencia"
+    # Botones que redirigen al tema de Consulta y al tema de Sugerencia respectivamente
     keyboard = [
-        [InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=url_consulta)],
-        [InlineKeyboardButton("Iniciar Sugerencia 💡", url=url_sugerencia)]
+        [InlineKeyboardButton("Ir al tema de Consulta", url=f"https://t.me/c/{get_short_group_id()}/{TEMA_CONSULTAS_EXTERNO}")],
+        [InlineKeyboardButton("Ir al tema de Sugerencia", url=f"https://t.me/c/{get_short_group_id()}/{TEMA_SUGERENCIAS_EXTERNO}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     mensaje = (
