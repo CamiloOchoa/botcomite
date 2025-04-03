@@ -42,7 +42,7 @@ GRUPO_EXTERNO_ID = -1002433074372
 TEMA_CONSULTAS_EXTERNO = 69         
 TEMA_SUGERENCIAS_EXTERNO = 71       
 # Tema de Documentación (en el grupo interno)
-TEMA_DOCUMENTACION = 999  # Ajusta este valor según corresponda
+TEMA_DOCUMENTACION = 11  # Ajusta este valor según corresponda
 
 # --- Funciones auxiliares para obtener los short id ---
 def get_short_committee_id() -> str:
