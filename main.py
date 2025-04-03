@@ -84,7 +84,12 @@ async def post_initial_buttons(context: ContextTypes.DEFAULT_TYPE) -> bool:
     kb_con = [[InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", url=url_con)]]
     markup_con = InlineKeyboardMarkup(kb_con)
     try:
-        await context.bot.send_message(chat_id=GRUPO_ID, message_thread_id=TEMA_BOTON_CONSULTAS_COMITE, text=msg_con, reply_markup=markup_con)
+        await context.bot.send_message(
+            chat_id=GRUPO_ID,
+            message_thread_id=TEMA_BOTON_CONSULTAS_COMITE,
+            text=msg_con,
+            reply_markup=markup_con
+        )
         logger.info(f"Botón de Consulta enviado al Grupo {GRUPO_ID}, Tema {TEMA_BOTON_CONSULTAS_COMITE}")
         success_count += 1
     except TelegramError as e:
@@ -99,7 +104,12 @@ async def post_initial_buttons(context: ContextTypes.DEFAULT_TYPE) -> bool:
     kb_sug = [[InlineKeyboardButton("Iniciar Sugerencia 💡", url=url_sug)]]
     markup_sug = InlineKeyboardMarkup(kb_sug)
     try:
-        await context.bot.send_message(chat_id=GRUPO_ID, message_thread_id=TEMA_BOTON_SUGERENCIAS_COMITE, text=msg_sug, reply_markup=markup_sug)
+        await context.bot.send_message(
+            chat_id=GRUPO_ID,
+            message_thread_id=TEMA_BOTON_SUGERENCIAS_COMITE,
+            text=msg_sug,
+            reply_markup=markup_sug
+        )
         logger.info(f"Botón de Sugerencia enviado al Grupo {GRUPO_ID}, Tema {TEMA_BOTON_SUGERENCIAS_COMITE}")
         success_count += 1
     except TelegramError as e:
@@ -294,12 +304,14 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             logger.error(f"Excepción inesperada enviando {action_type} de {user.id}: {e}", exc_info=True)
             try:
                 await update.message.reply_text(f"❌ Ha ocurrido un error inesperado al procesar tu {action_type}.")
-            except Exception:\n                pass
+            except Exception:
+                pass
     else:
         logger.error(f"Destino inválido para {action_type} de {user.id}.")
         try:
             await update.message.reply_text("❌ Error interno: destino no válido.")
-        except Exception:\n            pass
+        except Exception:
+            pass
 
     raise ApplicationHandlerStop
     return ConversationHandler.END
