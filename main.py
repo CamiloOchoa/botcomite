@@ -44,6 +44,9 @@ GRUPO_EXTERNO_ID = -1002433074372
 TEMA_CONSULTAS_EXTERNO = 69
 TEMA_SUGERENCIAS_EXTERNO = 71
 
+# Tema de Documentación (en el grupo interno)
+TEMA_DOCUMENTACION = 11  # <--- Ajusta al ID de tema real donde quieras enviar la documentación
+
 # --- Funciones auxiliares para obtener los short id ---
 def get_short_committee_id() -> str:
     """Convierte el ID del grupo del Comité al formato de enlace (sin el prefijo -100)."""
@@ -150,32 +153,29 @@ async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYP
 # --- Comando para Documentación ---
 async def documentacion_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
-    Envía un mensaje con 4 enlaces (en forma de botones) a la documentación:
-    Calendario laboral, Tablas salariales 2025, Convenio y Protocolo de acoso.
-    Ajusta las URLs a tu gusto.
+    Envía un mensaje al tema de Documentación en el grupo interno, mostrando 4 botones.
+    El mensaje será solo 'Documentación disponible:' + los botones, sin texto adicional.
     """
-    chat = update.effective_chat
-    if not chat or chat.type != 'private':
-        # Solo permitir este comando en privado, si lo deseas
-        return
-
-    # Puedes personalizar las URLs y el texto
+    # Ajusta los enlaces a tus documentos reales:
     keyboard = [
-        [InlineKeyboardButton("📅 Calendario Laboral", url="https://t.me/c/YOUR_GROUP_ID/11")],
-        [InlineKeyboardButton("💰 Tablas Salariales 2025", url="https://t.me/c/YOUR_GROUP_ID/12")],
-        [InlineKeyboardButton("⚖️ Convenio", url="https://t.me/c/YOUR_GROUP_ID/13")],
-        [InlineKeyboardButton("🛡️ Protocolo Acoso", url="https://t.me/c/YOUR_GROUP_ID/14")]
+        [InlineKeyboardButton("Calendario Laboral", url="https://t.me/c/YOUR_GROUP_ID/11")],
+        [InlineKeyboardButton("Tablas Salariales 2025", url="https://t.me/c/YOUR_GROUP_ID/12")],
+        [InlineKeyboardButton("Convenio", url="https://t.me/c/YOUR_GROUP_ID/13")],
+        [InlineKeyboardButton("Protocolo Acoso", url="https://t.me/c/YOUR_GROUP_ID/14")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    texto = (
-        "<b>Documentación disponible</b>:\n\n"
-        "• Calendario laboral\n"
-        "• Tablas salariales 2025\n"
-        "• Convenio\n"
-        "• Protocolo para la prevención y actuación en los casos de acoso laboral\n\n"
-        "Pulsa en el enlace que necesites:"
-    )
-    await update.message.reply_text(texto, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+
+    # Envía el mensaje directamente al tema de documentación en el grupo interno
+    try:
+        await context.bot.send_message(
+            chat_id=GRUPO_ID,
+            message_thread_id=TEMA_DOCUMENTACION,
+            text="Documentación disponible:",
+            reply_markup=reply_markup
+        )
+        logger.info(f"Mensaje de Documentación enviado a G:{GRUPO_ID}, T:{TEMA_DOCUMENTACION}")
+    except Exception as e:
+        logger.error(f"Error enviando Documentación a T:{TEMA_DOCUMENTACION}: {e}")
 
 # --- Handler para /start ---
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int | None:
@@ -285,7 +285,7 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
                 "Mensaje demasiado corto, el mensaje no ha sido enviado. "
                 "Inicia una nueva consulta presionando el siguiente botón."
             )
-            # Redirigimos al TEMA INTERNO (Comité), no al externo
+            # Redirigimos al TEMA INTERNO (Comité)
             button = InlineKeyboardButton(
                 "Ir al tema de Consulta",
                 url=f"https://t.me/c/{get_short_committee_id()}/{TEMA_BOTON_CONSULTAS_COMITE}"
@@ -350,14 +350,13 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         raise ApplicationHandlerStop
         return ConversationHandler.END
 
-    # Enviar el mensaje al grupo externo
+    # Enviar el mensaje al grupo externo, SIN mostrar el ID
     if target_chat_id and target_thread_id:
         user_info = user.full_name
         if user.username:
             user_info += f" (@{user.username})"
-        fwd_msg = (
-            f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}** (ID: {user.id}):\n\n{user_text}"
-        )
+        # Quitar el ID del usuario en el texto
+        fwd_msg = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
         try:
             await context.bot.send_message(
                 chat_id=target_chat_id,
@@ -494,7 +493,7 @@ def main() -> None:
     # Registro de handlers
     application.add_handler(conv_handler, group=0)
     application.add_handler(CommandHandler("postbotones", post_buttons_command, filters=filters.ChatType.PRIVATE), group=1)
-    # Nuevo comando para la documentación
+    # Comando para enviar Documentación al tema correspondiente
     application.add_handler(CommandHandler("documentacion", documentacion_command, filters=filters.ChatType.PRIVATE), group=1)
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_unexpected_message), group=2)
 
@@ -512,3 +511,4 @@ if __name__ == '__main__':
         main()
     except Exception as e:
         logger.critical(f"Error fatal durante la inicialización del bot: {e}", exc_info=True)
+
