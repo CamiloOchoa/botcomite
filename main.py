@@ -29,11 +29,11 @@ if not TOKEN:
     exit(1)
 
 # --- Variables Globales ---
-# Grupo del Comité (interno) para botones y documentación
+# Grupo del Comité (interno)
 GRUPO_ID = int(os.environ.get("GROUP_ID", "-1001234567890"))
 TEMA_BOTON_CONSULTAS_COMITE = 272
 TEMA_BOTON_SUGERENCIAS_COMITE = 291
-# Grupo EXTERNO para recibir mensajes de consultas/sugerencias
+# Grupo EXTERNO para envío de mensajes válidos
 GRUPO_EXTERNO_ID = -1002433074372  
 TEMA_CONSULTAS_EXTERNO = 69         
 TEMA_SUGERENCIAS_EXTERNO = 71       
@@ -59,9 +59,10 @@ def validar_variables():
         logger.critical(f"❌ Error en la validación de variables de entorno: {e}", exc_info=True)
         return False
 
-# --- Función para enviar botones iniciales (en el grupo interno) ---
+# --- Envío de botones iniciales al grupo interno ---
 async def post_initial_buttons(context: ContextTypes.DEFAULT_TYPE) -> bool:
     success_count = 0
+
     # Botón de Consultas
     msg_con = (
         "Pulsa aquí si tienes alguna consulta sobre permisos, bolsa de horas, excedencias, etc. "
@@ -104,12 +105,11 @@ async def post_initial_buttons(context: ContextTypes.DEFAULT_TYPE) -> bool:
 
     return success_count > 0
 
-# --- Comando /postbotones (no afecta al flujo de consultas) ---
+# --- Comando /postbotones ---
 async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
     if update.effective_chat.type != 'private':
         return
-    logger.info(f"/postbotones recibido de {user.id}.")
+    logger.info(f"/postbotones recibido de {update.effective_user.id}.")
     await update.message.reply_text("Intentando publicar/actualizar botones en el grupo del Comité...")
     try:
         success = await post_initial_buttons(context)
@@ -121,7 +121,7 @@ async def post_buttons_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("✅ ¡Botones posteados/actualizados con éxito!")
     else:
         await update.message.reply_text("⚠️ No se pudieron enviar uno o ambos botones.")
-    
+
 # --- Comando /documentacion ---
 async def documentacion_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     keyboard = [
@@ -143,7 +143,7 @@ async def documentacion_command(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception as e:
         logger.error(f"Error enviando Documentación a T:{TEMA_DOCUMENTACION}: {e}")
 
-# --- Callback Handler: cuando se pulsa el botón en /postforo ---
+# --- Callback Handler para Iniciar Conversación ---
 async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -169,7 +169,7 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     else:
         await context.bot.send_message(chat_id=user.id, text="Acción no reconocida.")
 
-# --- Comando /postforo: envía los mensajes a los temas internos ---
+# --- Comando /postforo ---
 async def foro_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     # Mensaje para consultas
     text_consultas = (
@@ -190,6 +190,7 @@ async def foro_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.info("Mensaje de consultas enviado al tema interno de consultas.")
     except Exception as e:
         logger.error(f"Error enviando mensaje de consultas: {e}")
+
     # Mensaje para sugerencias
     text_sugerencias = (
         "Pulsa el botón si tienes alguna sugerencia para mejorar el grupo o el funcionamiento del comité.\n"
@@ -209,125 +210,8 @@ async def foro_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception as e:
         logger.error(f"Error enviando mensaje de sugerencias: {e}")
 
-# --- Handler Global para mensajes en privado (flujo de conversación) ---
+# --- Handler global para mensajes privados ---
 async def private_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Procesa los mensajes en privado:
-    - Si se tiene 'action_type' en context.user_data, se procesa como parte del flujo (llama a receive_text).
-    - Si no, se llama a handle_unexpected_message.
-    """
-    if context.user_data.get('action_type'):
-        await receive_text(update, context)
-    else:
-        await handle_unexpected_message(update, context)
-
-# --- Handler para /cancel ---
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    try:
-        await update.message.reply_text("Operación cancelada. Puedes empezar de nuevo usando los botones del grupo.")
-    except Exception as e:
-        logger.error(f"Error enviando mensaje de cancelación a {user.id}: {e}")
-    context.user_data.clear()
-
-# --- Handler para Recibir Texto (Flujo de Conversación) ---
-async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
-    message = update.message
-    if not message or not message.text:
-        return
-    user_text = message.text.strip()
-    action_type = context.user_data.pop('action_type', None)
-    if not action_type:
-        # Si no hay flujo activo, se considera mensaje fuera de contexto
-        await handle_unexpected_message(update, context)
-        return
-
-    # Validación de longitud: mínimo 15 caracteres
-    if len(user_text) < 15:
-        if action_type == "consulta":
-            error_text = (
-                "Mensaje demasiado corto, el mensaje no ha sido enviado. "
-                "Inicia una nueva consulta presionando el siguiente botón."
-            )
-            button = InlineKeyboardButton(
-                "Ir al tema de Consulta",
-                url=f"https://t.me/c/{get_short_committee_id()}/{TEMA_BOTON_CONSULTAS_COMITE}"
-            )
-        else:
-            error_text = (
-                "Mensaje demasiado corto, el mensaje no ha sido enviado. "
-                "Inicia una nueva sugerencia presionando el siguiente botón."
-            )
-            button = InlineKeyboardButton(
-                "Ir al tema de Sugerencia",
-                url=f"https://t.me/c/{get_short_committee_id()}/{TEMA_BOTON_SUGERENCIAS_COMITE}"
-            )
-        reply_markup = InlineKeyboardMarkup([[button]])
-        try:
-            await update.message.reply_text(error_text, reply_markup=reply_markup)
-        except Exception as e:
-            logger.error(f"Error enviando mensaje de longitud insuficiente a {user.id}: {e}")
-        return
-
-    # Validación adicional para consultas prohibidas
-    if action_type == 'consulta':
-        text_lower = user_text.lower()
-        forbidden_map = {
-            "bolsa de horas": "bolsa de horas",
-            "permiso": "permisos",
-            "permisos": "permisos",
-            "incapacidad temporal": "incapacidad temporal / baja",
-            "baja": "incapacidad temporal / baja",
-            "excedencia": "excedencias",
-            "excedencias": "excedencias"
-        }
-        for keyword, topic_name in forbidden_map.items():
-            if keyword in text_lower:
-                try:
-                    await update.message.reply_text(
-                        f"❌ Tu consulta sobre '{topic_name}' no puede ser procesada por este bot.\n"
-                        "Por favor, revisa la información en el grupo o la documentación oficial."
-                    )
-                except Exception as e:
-                    logger.error(f"Error enviando mensaje de rechazo a {user.id}: {e}")
-                return
-
-    # Enviar mensaje al grupo EXTERNO sin incluir el ID
-    if action_type == 'consulta':
-        target_chat_id = GRUPO_EXTERNO_ID
-        target_thread_id = TEMA_CONSULTAS_EXTERNO
-    elif action_type == 'sugerencia':
-        target_chat_id = GRUPO_EXTERNO_ID
-        target_thread_id = TEMA_SUGERENCIAS_EXTERNO
-    else:
-        await update.message.reply_text("❌ Error interno: acción no reconocida.")
-        return
-
-    user_info = user.full_name
-    if user.username:
-        user_info += f" (@{user.username})"
-    fwd_msg = f"ℹ️ **Nueva {action_type.capitalize()} de {user_info}**:\n\n{user_text}"
-    try:
-        await context.bot.send_message(
-            chat_id=target_chat_id,
-            message_thread_id=target_thread_id,
-            text=fwd_msg,
-            parse_mode=ParseMode.MARKDOWN
-        )
-        await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias.")
-    except TelegramError as e:
-        logger.error(f"Error de Telegram API enviando {action_type} de {user.id}: {e}", exc_info=False)
-        await update.message.reply_text(f"❌ Hubo un problema al enviar tu {action_type}.")
-    except Exception as e:
-        logger.error(f"Excepción inesperada enviando {action_type} de {user.id}: {e}", exc_info=True)
-        await update.message.reply_text(f"❌ Ocurrió un error inesperado al procesar tu {action_type}.")
-
-    # Fin del flujo
-    context.user_data.clear()
-
-# --- Handler para Mensajes Fuera de Flujo ---
-async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if context.user_data.get('action_type'):
         await receive_text(update, context)
     else:
@@ -336,7 +220,54 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
             [InlineKeyboardButton("Ir al tema de Sugerencia", url=f"https://t.me/c/{get_short_committee_id()}/{TEMA_BOTON_SUGERENCIAS_COMITE}")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text("Si quieres hacer otra consulta o sugerencia, presiona los botones que hay a continuación:", reply_markup=reply_markup)
+        await update.message.reply_text(
+            "Si quieres hacer otra consulta o sugerencia, presiona los botones que hay a continuación:",
+            reply_markup=reply_markup
+        )
+
+# --- Handler para /start (inicio de conversación) ---
+async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    chat = update.effective_chat
+    args = context.args
+    logger.info(f"/start de {user.id if user else '?'} en chat:{chat.id if chat else '?'} - Args: {args}")
+    if chat.type == "private":
+        if args:
+            payload = args[0]
+            action_type = None
+            if payload == "iniciar_consulta":
+                action_type = "consulta"
+            elif payload == "iniciar_sugerencia":
+                action_type = "sugerencia"
+            if action_type:
+                context.user_data.clear()
+                logger.info(f"Payload '{payload}' válido recibido de {user.id}.")
+                context.user_data['action_type'] = action_type
+                if action_type == "consulta":
+                    prompt = (
+                        "Hola, por favor, escribe ahora tu consulta en un único mensaje.\n"
+                        "- Recibirás una respuesta en la mayor brevedad posible.\n"
+                        "- Recuerda que las consultas solo las pueden ver los miembros del comité."
+                    )
+                else:
+                    prompt = (
+                        "Hola, por favor, escribe ahora tu sugerencia en un único mensaje.\n"
+                        "- Recuerda que las sugerencias solo las pueden ver los miembros del comité."
+                    )
+                await update.message.reply_text(prompt)
+            else:
+                await update.message.reply_text("El enlace que has usado no es válido o ha expirado.")
+                context.user_data.clear()
+        else:
+            await update.message.reply_text("Hola, para enviar una consulta o sugerencia, usa los botones en el grupo del Comité.")
+            context.user_data.clear()
+    else:
+        logger.info(f"/start ignorado en chat no privado ({chat.id}, tipo: {chat.type})")
+
+# --- Handler para /cancel ---
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text("Operación cancelada. Puedes empezar de nuevo usando los botones del grupo.")
+    context.user_data.clear()
 
 # --- Configuración y Ejecución Principal ---
 def main() -> None:
@@ -346,14 +277,13 @@ def main() -> None:
 
     application = Application.builder().token(TOKEN).build()
 
-    # Registramos los comandos y handlers en chat privado
     application.add_handler(CommandHandler("postbotones", post_buttons_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("documentacion", documentacion_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("postforo", foro_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(CallbackQueryHandler(callback_iniciar, pattern="^iniciar_.*"), group=1)
-    # Handler global para mensajes privados
+    application.add_handler(CommandHandler("start", start_handler, filters=filters.ChatType.PRIVATE))
+    application.add_handler(CommandHandler("cancel", cancel, filters=filters.ChatType.PRIVATE))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, private_message_handler), group=2)
-    application.add_handler(CommandHandler("cancel", cancel, filters=filters.ChatType.PRIVATE), group=2)
 
     logger.info("--- Iniciando Polling del Bot ---")
     try:
