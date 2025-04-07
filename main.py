@@ -11,8 +11,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ConversationHandler,
     filters,
-    ContextTypes,
-    ApplicationHandlerStop
+    ContextTypes
 )
 from telegram.constants import ParseMode
 from telegram.error import TelegramError
@@ -35,9 +34,11 @@ if not TOKEN:
 GRUPO_ID = int(os.environ.get("GROUP_ID", "-1001234567890"))
 TEMA_BOTON_CONSULTAS_COMITE = 272
 TEMA_BOTON_SUGERENCIAS_COMITE = 291
+
 GRUPO_EXTERNO_ID = -1002433074372  
 TEMA_CONSULTAS_EXTERNO = 69         
 TEMA_SUGERENCIAS_EXTERNO = 71       
+
 TEMA_DOCUMENTACION = 11  # Ajusta este valor según corresponda
 
 def get_short_committee_id() -> str:
@@ -61,6 +62,7 @@ def validar_variables():
 # --- Función para enviar botones iniciales (en el grupo interno) ---
 async def post_initial_buttons(context: ContextTypes.DEFAULT_TYPE) -> bool:
     success_count = 0
+
     # Botón de Consultas
     msg_con = (
         "Pulsa aquí si tienes alguna consulta sobre permisos, bolsa de horas, excedencias, etc. "
@@ -167,7 +169,7 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await context.bot.send_message(chat_id=user.id, text="Acción no reconocida.")
             return ConversationHandler.END
 
-        # Comprobamos si el usuario ya inició conversación con el bot
+        # Intentamos enviar una acción de "typing" para comprobar comunicación privada
         try:
             await context.bot.send_chat_action(chat_id=user.id, action="typing")
         except TelegramError as e:
@@ -177,10 +179,10 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return TYPING_REPLY
 
     except TelegramError as e:
+        # Si falla, el usuario no ha iniciado conversación privada
         start_link = f"https://t.me/ComitePolobot?start={data}"
         await query.message.reply_text(
-            f"Parece que aún no has iniciado una conversación privada conmigo. "
-            f"Inicia el chat pulsando este enlace y luego vuelve a presionar el botón:\n{start_link}"
+            f"Parece que aún no has iniciado una conversación privada conmigo. Inicia el chat pulsando este enlace y luego vuelve a presionar el botón:\n{start_link}"
         )
         return ConversationHandler.END
 
@@ -261,26 +263,6 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await update.message.reply_text(error_text, reply_markup=markup)
         return ConversationHandler.END
 
-    # Validación adicional para consultas prohibidas
-    if action_type == "consulta":
-        text_lower = user_text.lower()
-        forbidden_map = {
-            "bolsa de horas": "bolsa de horas",
-            "permiso": "permisos",
-            "permisos": "permisos",
-            "incapacidad temporal": "incapacidad temporal / baja",
-            "baja": "incapacidad temporal / baja",
-            "excedencia": "excedencias",
-            "excedencias": "excedencias"
-        }
-        for keyword, topic in forbidden_map.items():
-            if keyword in text_lower:
-                await update.message.reply_text(
-                    f"❌ Tu consulta sobre '{topic}' no puede ser procesada por este bot.\n"
-                    "Por favor, revisa la información en el grupo o la documentación oficial."
-                )
-                return ConversationHandler.END
-
     if action_type == "consulta":
         target_chat_id = GRUPO_EXTERNO_ID
         target_thread_id = TEMA_CONSULTAS_EXTERNO
@@ -321,6 +303,54 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
         "Si quieres hacer otra consulta o sugerencia, presiona los botones que hay a continuación:",
         reply_markup=markup
     )
+
+# --- Handler para /cancel ---
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    await update.message.reply_text("Operación cancelada. Puedes empezar de nuevo usando los botones del grupo.")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# --- Comando /postforo: envía mensajes a los foros internos ---
+async def foro_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_chat.type != 'private':
+        return
+
+    text_consultas = (
+        "Si no has encontrado la información que buscas en las secciones del grupo (permisos, bolsa de horas, excedencias, etc...), "
+        "pulsa el siguiente botón y envíanos un mensaje.\n"
+        "- Recuerda que estas consultas son privadas y solo pueden verlas los miembros del comité.\n"
+        "- La consulta debe ser enviada en un solo mensaje."
+    )
+    kb_consultas = [[InlineKeyboardButton("Iniciar consulta", callback_data="iniciar_consulta")]]
+    markup_consultas = InlineKeyboardMarkup(kb_consultas)
+    try:
+        await context.bot.send_message(
+            chat_id=GRUPO_ID,
+            message_thread_id=TEMA_BOTON_CONSULTAS_COMITE,
+            text=text_consultas,
+            reply_markup=markup_consultas
+        )
+        logger.info("Mensaje de consultas enviado al foro interno de consultas.")
+    except Exception as e:
+        logger.error(f"Error enviando mensaje de consultas: {e}", exc_info=True)
+
+    text_sugerencias = (
+        "Pulsa el botón si tienes alguna sugerencia para mejorar el grupo o el funcionamiento del comité.\n"
+        "- Recuerda que estas sugerencias son privadas y solo pueden verlas los miembros del comité.\n"
+        "- La sugerencia debe ser enviada en un solo mensaje."
+    )
+    kb_sugerencias = [[InlineKeyboardButton("Iniciar sugerencia", callback_data="iniciar_sugerencia")]]
+    markup_sugerencias = InlineKeyboardMarkup(kb_sugerencias)
+    try:
+        await context.bot.send_message(
+            chat_id=GRUPO_ID,
+            message_thread_id=TEMA_BOTON_SUGERENCIAS_COMITE,
+            text=text_sugerencias,
+            reply_markup=markup_sugerencias
+        )
+        logger.info("Mensaje de sugerencias enviado al foro interno de sugerencias.")
+    except Exception as e:
+        logger.error(f"Error enviando mensaje de sugerencias: {e}", exc_info=True)
 
 def main() -> None:
     if not validar_variables():
