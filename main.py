@@ -177,7 +177,7 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return TYPING_REPLY
 
     except TelegramError as e:
-        start_link = f"https://t.me/TU_BOT_USERNAME?start={data}"
+        start_link = f"https://t.me/ComitePolobot?start={data}"
         await query.message.reply_text(
             f"Parece que aún no has iniciado una conversación privada conmigo. "
             f"Inicia el chat pulsando este enlace y luego vuelve a presionar el botón:\n{start_link}"
