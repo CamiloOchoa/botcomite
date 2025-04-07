@@ -31,14 +31,15 @@ if not TOKEN:
     logger.critical("TELEGRAM_TOKEN no está configurada correctamente.")
     exit(1)
 
+# Grupo del Comité (interno) para botones y documentación
 GRUPO_ID = int(os.environ.get("GROUP_ID", "-1001234567890"))
 TEMA_BOTON_CONSULTAS_COMITE = 272
 TEMA_BOTON_SUGERENCIAS_COMITE = 291
-
+# Grupo EXTERNO para recibir mensajes (debe ser un grupo con temas habilitados)
 GRUPO_EXTERNO_ID = -1002433074372  
 TEMA_CONSULTAS_EXTERNO = 69         
 TEMA_SUGERENCIAS_EXTERNO = 71       
-
+# Tema de Documentación (interno)
 TEMA_DOCUMENTACION = 11  # Ajusta este valor según corresponda
 
 def get_short_committee_id() -> str:
@@ -169,7 +170,7 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await context.bot.send_message(chat_id=user.id, text="Acción no reconocida.")
             return ConversationHandler.END
 
-        # Intentamos enviar una acción de "typing" para comprobar comunicación privada
+        # Comprobar si el usuario puede recibir mensajes privados
         try:
             await context.bot.send_chat_action(chat_id=user.id, action="typing")
         except TelegramError as e:
@@ -179,7 +180,7 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return TYPING_REPLY
 
     except TelegramError as e:
-        # Si falla, el usuario no ha iniciado conversación privada
+        # Si falla, el usuario no ha iniciado conversación con el bot
         start_link = f"https://t.me/ComitePolobot?start={data}"
         await query.message.reply_text(
             f"Parece que aún no has iniciado una conversación privada conmigo. Inicia el chat pulsando este enlace y luego vuelve a presionar el botón:\n{start_link}"
@@ -263,6 +264,9 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await update.message.reply_text(error_text, reply_markup=markup)
         return ConversationHandler.END
 
+    # Log adicional para verificar datos de envío
+    logger.info(f"Enviando {action_type} al grupo EXTERNO: chat_id={GRUPO_EXTERNO_ID}, tema={TEMA_CONSULTAS_EXTERNO if action_type=='consulta' else TEMA_SUGERENCIAS_EXTERNO}")
+
     if action_type == "consulta":
         target_chat_id = GRUPO_EXTERNO_ID
         target_thread_id = TEMA_CONSULTAS_EXTERNO
@@ -304,13 +308,11 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
         reply_markup=markup
     )
 
-# --- Handler para /cancel ---
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Operación cancelada. Puedes empezar de nuevo usando los botones del grupo.")
     context.user_data.clear()
     return ConversationHandler.END
 
-# --- Comando /postforo: envía mensajes a los foros internos ---
 async def foro_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_chat.type != 'private':
         return
@@ -365,9 +367,7 @@ def main() -> None:
             CallbackQueryHandler(callback_iniciar, pattern="^iniciar_.*")
         ],
         states={
-            TYPING_REPLY: [
-                MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)
-            ]
+            TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)]
         },
         fallbacks=[
             CommandHandler('cancel', cancel_command, filters=filters.ChatType.PRIVATE),
