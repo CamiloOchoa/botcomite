@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import logging
 import re
@@ -36,6 +37,7 @@ GRUPO_EXTERNO_ID = int(os.environ.get("GRUPO_EXTERNO_ID", "0")) # Grupo EXTERNO 
 TEMA_ID_CONSULTAS_EXTERNO = int(os.environ.get("TEMA_CONSULTAS_EXTERNO", "0")) # Tema para *recibir* consultas
 TEMA_ID_SUGERENCIAS_EXTERNO = int(os.environ.get("TEMA_SUGERENCIAS_EXTERNO", "0")) # Tema para *recibir* sugerencias
 TEMA_ID_DOCUMENTACION = int(os.environ.get("TEMA_DOCUMENTACION", "0")) # Tema de Documentación (interno)
+MIN_MSG_LENGTH = 15 # Longitud mínima del mensaje
 
 # --- Validación de Variables ---
 def validar_variables():
@@ -49,7 +51,6 @@ def validar_variables():
     if GRUPO_EXTERNO_ID >= 0 or GRUPO_EXTERNO_ID == 0:
         logger.error(f"❌ GRUPO_EXTERNO_ID ({GRUPO_EXTERNO_ID}) debe ser un ID de grupo válido (negativo).")
         valid = False
-    # Validar que los IDs de temas sean números positivos
     if TEMA_ID_PANEL_CONSULTAS <= 0:
          logger.error(f"❌ TEMA_BOTON_CONSULTAS_COMITE ({TEMA_ID_PANEL_CONSULTAS}) debe ser un ID de tema válido (positivo).")
          valid = False
@@ -76,13 +77,11 @@ def validar_variables():
 async def post_action_panels(context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Envía o actualiza los mensajes con botones de acción en los temas designados."""
     success_count = 0
-
     # Panel de Consultas
     text_consultas = (
         "Pulsa aquí si tienes alguna consulta sobre permisos, bolsa de horas, excedencias, etc.\n"
         "Tu mensaje será privado y solo se permite enviar uno por vez."
     )
-    # CORRECTO: Usar callback_data para iniciar la acción en el bot
     kb_consultas = [[InlineKeyboardButton("Iniciar Consulta 🙋‍♂️", callback_data="iniciar_consulta")]]
     markup_consultas = InlineKeyboardMarkup(kb_consultas)
     try:
@@ -99,13 +98,11 @@ async def post_action_panels(context: ContextTypes.DEFAULT_TYPE) -> bool:
     except Exception as e:
         logger.error(f"Excepción inesperada enviando Panel Consulta: {e}", exc_info=True)
 
-
     # Panel de Sugerencias
     text_sugerencias = (
         "Pulsa aquí si tienes alguna sugerencia sobre el funcionamiento del grupo o el comité.\n"
         "Tu mensaje será privado y solo se permite enviar uno por vez."
     )
-     # CORRECTO: Usar callback_data para iniciar la acción en el bot
     kb_sugerencias = [[InlineKeyboardButton("Iniciar Sugerencia 💡", callback_data="iniciar_sugerencia")]]
     markup_sugerencias = InlineKeyboardMarkup(kb_sugerencias)
     try:
@@ -127,11 +124,6 @@ async def post_action_panels(context: ContextTypes.DEFAULT_TYPE) -> bool:
 # --- Comando para que un admin postee/actualice los paneles ---
 async def post_panels_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Comando para (re)postear los paneles de consulta y sugerencia."""
-    # Idealmente, verificar si el usuario es admin del bot o del grupo
-    # if update.effective_user.id not in ADMIN_USER_IDS:
-    #     await update.message.reply_text("No tienes permiso para usar este comando.")
-    #     return
-
     if update.effective_chat.type != 'private':
         await update.message.reply_text("Este comando solo se puede usar en chat privado.")
         return
@@ -152,7 +144,6 @@ async def post_panels_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 # --- Comando para postear/actualizar el panel de Documentación ---
 async def documentacion_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Envía el mensaje con enlaces a la documentación al tema correspondiente."""
-    # Idealmente, verificar si el usuario es admin
     if update.effective_chat.type != 'private':
         await update.message.reply_text("Este comando solo se puede usar en chat privado.")
         return
@@ -176,7 +167,7 @@ async def documentacion_command(update: Update, context: ContextTypes.DEFAULT_TY
             message_thread_id=TEMA_ID_DOCUMENTACION,
             text="📄 *Documentación disponible:*",
             reply_markup=reply_markup,
-            parse_mode=ParseMode.MARKDOWN # O usa HTML si prefieres
+            parse_mode=ParseMode.MARKDOWN
         )
         logger.info(f"Mensaje de Documentación enviado a G:{GRUPO_ID}, T:{TEMA_ID_DOCUMENTACION}")
         await update.message.reply_text("✅ Panel de documentación posteado/actualizado.")
@@ -187,22 +178,22 @@ async def documentacion_command(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Excepción inesperada enviando Documentación: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error inesperado al enviar la documentación.")
 
-
 # --- Callback Handler para iniciar el flujo en privado (desde botones del grupo) ---
 async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Manejador para los botones 'iniciar_consulta' e 'iniciar_sugerencia'."""
     query = update.callback_query
     user = query.from_user
-    data = query.data # "iniciar_consulta" o "iniciar_sugerencia"
+    data = query.data
 
-    # Siempre responde al callback para quitar el "loading" del botón
     await query.answer()
-
-    context.user_data.clear() # Limpia datos de conversaciones anteriores
+    context.user_data.clear()
+    logger.debug(f"User {user.id} started conversation via callback '{data}'. Cleared user_data.")
 
     try:
+        action_text = ""
         if data == "iniciar_consulta":
             context.user_data['action_type'] = "consulta"
+            action_text = "consulta"
             prompt = (
                 "Hola 👋 Por favor, escribe ahora tu *consulta* en un único mensaje.\n\n"
                 "Recibirás una respuesta tan pronto como sea posible.\n"
@@ -210,50 +201,36 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
         elif data == "iniciar_sugerencia":
             context.user_data['action_type'] = "sugerencia"
+            action_text = "sugerencia"
             prompt = (
                 "Hola 👋 Por favor, escribe ahora tu *sugerencia* en un único mensaje.\n\n"
                 "_Recuerda que solo los miembros del comité verán tu mensaje._"
             )
         else:
-            # Esto no debería pasar si el pattern del handler es correcto
-            logger.warning(f"CallbackQuery con data inesperado recibido: {data}")
+            logger.warning(f"CallbackQuery con data inesperado recibido de user {user.id}: {data}")
             await context.bot.send_message(chat_id=user.id, text="Acción no reconocida.")
             return ConversationHandler.END
 
-        # Intenta enviar el mensaje de inicio al usuario en privado
         await context.bot.send_message(chat_id=user.id, text=prompt, parse_mode=ParseMode.MARKDOWN)
-        return TYPING_REPLY # Pasa al estado donde se espera el mensaje del usuario
+        logger.info(f"Prompt for '{action_text}' sent to user {user.id}. Entering TYPING_REPLY state.")
+        # Log user_data justo después de establecerlo
+        logger.debug(f"User {user.id} user_data after setting action_type: {context.user_data}")
+        return TYPING_REPLY
 
     except TelegramError as e:
-        # Error común: El usuario no ha iniciado una conversación con el bot todavía.
         if "bot can't initiate conversation with a user" in str(e) or "chat not found" in str(e):
-            logger.info(f"Usuario {user.id} ({user.full_name}) intentó usar el bot sin iniciarlo.")
-            # Informa al usuario (como notificación emergente en el botón)
+            logger.info(f"User {user.id} ({user.full_name}) attempted action '{data}' without starting bot.")
             await query.answer(
-                text="⚠️ Necesitas iniciar el chat conmigo primero. Búscame (@{context.bot.username}) y pulsa 'Iniciar', luego vuelve a pulsar este botón.",
-                show_alert=True # Muestra el mensaje como una alerta más persistente
+                text=f"⚠️ Necesitas iniciar el chat conmigo (@{context.bot.username}) y pulsar 'Iniciar', luego vuelve a pulsar el botón.",
+                show_alert=True
             )
-            # Opcionalmente, envía un mensaje al grupo/tema para guiar mejor
-            # try:
-            #     await query.message.reply_text(
-            #         f" Oye {user.mention_markdown()}, parece que aún no has iniciado una conversación privada conmigo."
-            #         f" Por favor, búscame ([@{context.bot.username}](https://t.me/{context.bot.username})) y pulsa 'Iniciar',"
-            #         f" luego vuelve a presionar el botón de '{'Consulta' if data=='iniciar_consulta' else 'Sugerencia'}'.",
-            #         parse_mode=ParseMode.MARKDOWN
-            #     )
-            # except Exception as group_msg_error:
-            #     logger.error(f"No se pudo enviar mensaje guía al grupo/tema: {group_msg_error}")
-
         else:
-            # Otro error de Telegram
-            logger.error(f"Error de Telegram al intentar iniciar conversación con {user.id}: {e}", exc_info=True)
-            await query.answer("❌ Ocurrió un error al procesar tu solicitud.", show_alert=True)
-
-        context.user_data.clear() # Limpia por si acaso
-        return ConversationHandler.END # Termina la conversación si no se pudo iniciar
-
+            logger.error(f"TelegramError initiating conversation with {user.id} for action '{data}': {e}", exc_info=True)
+            await query.answer("❌ Ocurrió un error técnico al iniciar.", show_alert=True)
+        context.user_data.clear()
+        return ConversationHandler.END
     except Exception as e:
-        logger.error(f"Excepción inesperada en callback_iniciar para {user.id}: {e}", exc_info=True)
+        logger.error(f"Unexpected exception in callback_iniciar for user {user.id}, data '{data}': {e}", exc_info=True)
         await query.answer("❌ Ocurrió un error inesperado.", show_alert=True)
         context.user_data.clear()
         return ConversationHandler.END
@@ -266,11 +243,13 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     args = context.args
 
     if chat.type != 'private':
-        # Ignorar /start en grupos
         return ConversationHandler.END
 
-    logger.info(f"/start recibido de {user.id} ({user.full_name}) con args: {args}")
-    context.user_data.clear() # Limpia estado previo
+    logger.info(f"/start received from {user.id} ({user.full_name}) with args: {args}")
+    # Log si había datos previos antes de limpiar
+    if context.user_data:
+        logger.debug(f"Clearing existing user_data for {user.id} on /start: {context.user_data}")
+    context.user_data.clear()
 
     if args:
         payload = args[0]
@@ -282,6 +261,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 "_Solo los miembros del comité verán tu mensaje._"
             )
             await update.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
+            logger.info(f"Deep link '/start iniciar_consulta' processed for {user.id}. Entering TYPING_REPLY.")
+            logger.debug(f"User {user.id} user_data after deep link start: {context.user_data}")
             return TYPING_REPLY
         elif payload == "iniciar_sugerencia":
             context.user_data['action_type'] = "sugerencia"
@@ -291,23 +272,23 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
                 "_Solo los miembros del comité verán tu mensaje._"
             )
             await update.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
+            logger.info(f"Deep link '/start iniciar_sugerencia' processed for {user.id}. Entering TYPING_REPLY.")
+            logger.debug(f"User {user.id} user_data after deep link start: {context.user_data}")
             return TYPING_REPLY
         else:
-            # Payload desconocido
             await update.message.reply_text(
                 "Hola 👋. El enlace que has usado no es válido o ha expirado.\n"
                 "Si quieres enviar una consulta o sugerencia, por favor, usa los botones correspondientes en el grupo del Comité."
             )
+            logger.warning(f"Invalid deep link payload '{payload}' received from user {user.id}.")
             return ConversationHandler.END
     else:
-        # /start sin payload
         await update.message.reply_text(
             "Hola 👋 Soy el bot asistente del Comité.\n"
             "Para enviar una *consulta* o *sugerencia* de forma privada, por favor, utiliza los botones 🙋‍♂️ o 💡 en los temas correspondientes del grupo del Comité."
-            # Puedes añadir aquí un enlace al grupo si es público o si tienes el enlace de invitación
-            # "[Ir al Grupo del Comité](TU_ENLACE_AL_GRUPO)"
             , parse_mode=ParseMode.MARKDOWN
         )
+        logger.info(f"Standard /start processed for user {user.id}.")
         return ConversationHandler.END
 
 # --- Handler para recibir el texto del usuario (dentro de la conversación) ---
@@ -315,65 +296,79 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     """Recibe el mensaje de consulta/sugerencia del usuario y lo reenvía."""
     user = update.effective_user
     message = update.message
-    chat = update.effective_chat
 
-    # Comprobaciones básicas
+    # === LOGGING ADICIONAL INICIO ===
+    logger.info(f"Received message from user {user.id} in potentially TYPING_REPLY state.")
+    logger.debug(f"Current user_data for {user.id} upon receiving message: {context.user_data}")
+    # === LOGGING ADICIONAL FIN ===
+
     if not message or not message.text:
-        logger.warning(f"Mensaje vacío o sin texto recibido de {user.id} en estado TYPING_REPLY.")
-        await update.message.reply_text("No he recibido un mensaje válido. Por favor, inténtalo de nuevo o usa /cancel.")
-        # Podríamos mantener el estado o cancelarlo. Cancelar es más seguro.
+        logger.warning(f"Empty or non-text message received from {user.id} in TYPING_REPLY state.")
+        # No enviar respuesta aquí, podría ser confuso si el estado realmente se perdió
+        context.user_data.clear()
+        return ConversationHandler.END # Salir silenciosamente si no hay texto
+
+    user_text = message.text.strip()
+    # Usamos .get() para evitar KeyError si user_data está vacío por alguna razón
+    action_type = context.user_data.get('action_type')
+
+    if not action_type:
+        logger.warning(f"receive_text called for {user.id} but 'action_type' is missing in user_data. Message: '{user_text[:50]}...'")
+        # Llamar a handle_unexpected_message SIEMPRE que no haya action_type
+        await handle_unexpected_message(update, context, called_from_receive_text=True)
+        context.user_data.clear() # Asegurarse de limpiar
+        return ConversationHandler.END
+
+    # --- Comprobación de longitud ---
+    if len(user_text) < MIN_MSG_LENGTH:
+        logger.info(f"{action_type.capitalize()} from {user.id} is too short ({len(user_text)} chars). Replying and ending conversation.")
+        error_text = (
+            f"⚠️ Tu {action_type} parece demasiado corta (mínimo {MIN_MSG_LENGTH} caracteres).\n"
+            f"El mensaje *no* ha sido enviado.\n\n"
+            f"Si fue un error, por favor, inicia el proceso de nuevo desde el botón en el grupo del Comité."
+        )
+        try:
+            await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
+        except TelegramError as reply_err:
+            logger.error(f"Failed to send 'too short' message to user {user.id}: {reply_err}")
+
         context.user_data.clear()
         return ConversationHandler.END
 
-    user_text = message.text.strip()
-    action_type = context.user_data.pop('action_type', None) # Obtiene y elimina action_type
+    # --- Preparación para enviar al grupo externo ---
+    logger.info(f"Message from {user.id} passed length check for {action_type}. Preparing to forward.")
 
-    # Si no hay action_type, algo fue mal (quizás un reinicio del bot?)
-    if not action_type:
-        logger.warning(f"receive_text llamado para {user.id} pero sin 'action_type' en user_data.")
-        await handle_unexpected_message(update, context) # Usa el manejador de mensajes inesperados
-        return ConversationHandler.END
-
-    # Validar longitud mínima
-    MIN_LENGTH = 15
-    if len(user_text) < MIN_LENGTH:
-        logger.info(f"{action_type.capitalize()} de {user.id} demasiado corta ({len(user_text)} caracteres).")
-        error_text = (
-            f"⚠️ Tu {action_type} parece demasiado corta (mínimo {MIN_LENGTH} caracteres).\n"
-            f"El mensaje *no* ha sido enviado.\n\n"
-            f"Si fue un error, por favor, inicia el proceso de nuevo desde el botón en el grupo del Comité."
-            # Opcional: Añadir botón para reintentar aquí mismo? Podría complicar el flujo.
-        )
-        await update.message.reply_text(error_text)
-        context.user_data.clear() # Limpia para evitar estados inconsistentes
-        return ConversationHandler.END
-
-    # Determinar a dónde enviar el mensaje
+    target_chat_id = GRUPO_EXTERNO_ID
     if action_type == "consulta":
-        target_chat_id = GRUPO_EXTERNO_ID
         target_thread_id = TEMA_ID_CONSULTAS_EXTERNO
         action_emoji = "🙋‍♂️"
     elif action_type == "sugerencia":
-        target_chat_id = GRUPO_EXTERNO_ID
         target_thread_id = TEMA_ID_SUGERENCIAS_EXTERNO
         action_emoji = "💡"
     else:
-        # Esto no debería ocurrir si la lógica es correcta
-        logger.error(f"Action type desconocido '{action_type}' en receive_text para user {user.id}.")
-        await update.message.reply_text("❌ Hubo un error interno inesperado. Por favor, contacta a un administrador.")
+        logger.error(f"Internal logic error: Unknown action_type '{action_type}' in receive_text for user {user.id}.")
+        try:
+            await update.message.reply_text("❌ Hubo un error interno inesperado (código: RT_UNK_AT). Por favor, contacta a un administrador.")
+        except TelegramError as reply_err:
+            logger.error(f"Failed to send internal error message to user {user.id}: {reply_err}")
         context.user_data.clear()
         return ConversationHandler.END
 
-    # Construir el mensaje a reenviar
-    user_mention = user.mention_markdown_v2() if user.username else user.full_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!') # Escapado manual básico para MarkdownV2 si no hay username
+    # Construir mensaje a reenviar
+    user_mention = user.mention_markdown_v2() if user.username else user.full_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!')
     fwd_msg_header = f"{action_emoji} *Nueva {action_type.capitalize()} de {user_mention}* `(ID: {user.id})`:\n{'-'*20}\n"
-    fwd_msg_body = user_text
-    # Escapar caracteres especiales de MarkdownV2 en el cuerpo del mensaje del usuario
-    escaped_body = fwd_msg_body.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!')
+    escaped_body = user_text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!')
     fwd_msg = fwd_msg_header + escaped_body
 
-    logger.info(f"Preparado para enviar {action_type} de {user.id} a G:{target_chat_id}, T:{target_thread_id}")
+    # === LOGGING ANTES DE ENVIAR ===
+    logger.info(f"Attempting to send {action_type} from user {user.id} to external group.")
+    logger.debug(f"Target Chat ID: {target_chat_id}")
+    logger.debug(f"Target Thread ID: {target_thread_id}")
+    # No loguear fwd_msg completo por privacidad, solo confirmar que se va a enviar
+    logger.debug(f"Parse Mode: {ParseMode.MARKDOWN_V2}")
+    # === FIN LOGGING ANTES DE ENVIAR ===
 
+    message_sent_to_group = False
     try:
         # Enviar mensaje al grupo/tema externo
         await context.bot.send_message(
@@ -382,53 +377,84 @@ async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             text=fwd_msg,
             parse_mode=ParseMode.MARKDOWN_V2
         )
-        logger.info(f"✅ {action_type.capitalize()} de {user.id} enviada correctamente.")
-        # Confirmar al usuario
+        message_sent_to_group = True
+        logger.info(f"✅ Successfully sent {action_type} from {user.id} to G:{target_chat_id} T:{target_thread_id}.")
+        # Confirmar al usuario SOLO si el envío fue exitoso
         await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias por tu aportación.")
 
     except TelegramError as e:
-        logger.error(f"Error de Telegram API enviando {action_type} de {user.id} a G:{target_chat_id} T:{target_thread_id}: {e}", exc_info=True)
-        # Informar al usuario del fallo
-        await update.message.reply_text(f"❌ Hubo un problema técnico al enviar tu {action_type}. Por favor, inténtalo de nuevo más tarde o contacta a un administrador si el problema persiste.")
-    except Exception as e:
-        logger.error(f"Excepción inesperada enviando {action_type} de {user.id}: {e}", exc_info=True)
-        await update.message.reply_text(f"❌ Ocurrió un error inesperado al procesar tu {action_type}. Por favor, contacta a un administrador.")
+        # === LOGGING DETALLADO DE TelegramError ===
+        logger.error(f"TelegramError sending {action_type} from {user.id} to G:{target_chat_id} T:{target_thread_id}. Error: {e}", exc_info=True)
+        # === FIN LOGGING DETALLADO ===
+        try:
+            # Informar al usuario del fallo técnico
+            await update.message.reply_text(f"❌ Hubo un problema técnico al enviar tu {action_type} (Error: TG-{e.__class__.__name__}). Por favor, inténtalo de nuevo más tarde o contacta a un administrador si el problema persiste.")
+        except TelegramError as reply_err:
+            logger.error(f"Failed to send TelegramError feedback message to user {user.id}: {reply_err}")
 
-    # Limpiar y finalizar la conversación
+    except Exception as e:
+        # === LOGGING DETALLADO DE Exception ===
+        logger.error(f"Unexpected Exception sending {action_type} from {user.id} to G:{target_chat_id} T:{target_thread_id}. Error: {e}", exc_info=True)
+        # === FIN LOGGING DETALLADO ===
+        try:
+             # Informar al usuario del fallo inesperado
+            await update.message.reply_text(f"❌ Ocurrió un error inesperado al procesar tu {action_type} (Error: EXC-{e.__class__.__name__}). Por favor, contacta a un administrador.")
+        except TelegramError as reply_err:
+             logger.error(f"Failed to send Exception feedback message to user {user.id}: {reply_err}")
+
+    # Limpiar y finalizar la conversación, independientemente del resultado del envío al grupo
+    logger.debug(f"Clearing user_data for {user.id} after processing {action_type} (sent to group: {message_sent_to_group}). Ending conversation.")
     context.user_data.clear()
     return ConversationHandler.END
 
 # --- Handler para mensajes fuera de flujo (en chat privado) ---
-async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAULT_TYPE, called_from_receive_text: bool = False) -> None:
     """Maneja mensajes de texto enviados al bot en privado fuera de una conversación activa."""
     user = update.effective_user
     chat = update.effective_chat
 
     # Asegurarse que es un chat privado y no un comando
-    if chat.type != 'private' or not update.message or not update.message.text or update.message.text.startswith('/'):
-        return # Ignorar otros casos
+    if not chat or chat.type != 'private' or not update.message or not update.message.text or update.message.text.startswith('/'):
+        # Ignorar otros casos (ej. comandos ya manejados, mensajes en grupos)
+        # No loguear aquí para evitar ruido si es un comando válido procesado por otro handler
+        return
 
-    logger.info(f"Mensaje inesperado recibido de {user.id} en chat privado: '{update.message.text[:50]}...'")
-    await update.message.reply_text(
-        "Hola 👋 Recibí tu mensaje, pero no estoy esperando una consulta o sugerencia en este momento.\n\n"
-        "Si quieres enviar una, por favor, ve al grupo del Comité y utiliza los botones 🙋‍♂️ (Consulta) o 💡 (Sugerencia) en los temas correspondientes.\n\n"
-        "También puedes usar /start para ver las opciones o /cancel si crees que estás en medio de una acción."
-        # De nuevo, enlace al grupo opcional si es relevante/posible
-        # "[Ir al Grupo del Comité](TU_ENLACE_AL_GRUPO)"
-        , parse_mode=ParseMode.MARKDOWN
-    )
+    # Log específico para mensajes inesperados
+    # Si viene de receive_text, el log ya se hizo allí
+    if not called_from_receive_text:
+        logger.info(f"Unexpected text message received from {user.id} in private chat (not in active conversation): '{update.message.text[:50]}...'")
+
+    try:
+        await update.message.reply_text(
+            "Hola 👋 Recibí tu mensaje, pero no estoy esperando una consulta o sugerencia en este momento.\n\n"
+            "Si quieres enviar una, por favor, ve al grupo del Comité y utiliza los botones 🙋‍♂️ (Consulta) o 💡 (Sugerencia) en los temas correspondientes.\n\n"
+            "También puedes usar /start para ver las opciones o /cancel si crees que estás en medio de una acción."
+            , parse_mode=ParseMode.MARKDOWN
+        )
+    except TelegramError as e:
+        logger.error(f"Failed to send unexpected message response to user {user.id}: {e}")
+
 
 # --- Comando para cancelar la conversación actual ---
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Permite al usuario cancelar la operación actual (consulta/sugerencia)."""
     user = update.effective_user
-    logger.info(f"Usuario {user.id} ({user.full_name}) ejecutó /cancel.")
+    chat = update.effective_chat
+
+    if not chat or chat.type != 'private':
+         # Ignorar /cancel en grupos
+         return ConversationHandler.END # O simplemente no retornar nada
+
+    logger.info(f"User {user.id} ({user.full_name}) executed /cancel.")
     if not context.user_data:
          await update.message.reply_text("No hay ninguna operación activa que cancelar.")
-         return ConversationHandler.END # Aunque no estuviera en la conversación, asegurarse que termina
+         # Asegurarse que si había un estado de conversación, termine
+         return ConversationHandler.END
 
-    await update.message.reply_text("Operación cancelada. Puedes empezar de nuevo cuando quieras usando los botones del grupo.")
+    # Si había datos, limpiarlos
+    logger.debug(f"Cancelling conversation for user {user.id}. Previous user_data: {context.user_data}")
     context.user_data.clear()
+    await update.message.reply_text("Operación cancelada. Puedes empezar de nuevo cuando quieras usando los botones del grupo.")
     return ConversationHandler.END
 
 # --- Función Principal ---
@@ -439,51 +465,49 @@ def main() -> None:
         return
 
     # Configura la aplicación del bot
+    # Considera añadir persistencia si los reinicios son frecuentes
+    # from telegram.ext import DictPersistence
+    # persistence = DictPersistence(filepath='bot_persistence') # O PicklePersistence
+    # application = ApplicationBuilder().token(TOKEN).persistence(persistence).build()
     application = ApplicationBuilder().token(TOKEN).build()
+
 
     # --- Define el manejador de conversación ---
     conv_handler = ConversationHandler(
         entry_points=[
-            # Punto de entrada principal: botones de callback en el grupo
             CallbackQueryHandler(callback_iniciar, pattern="^iniciar_(consulta|sugerencia)$"),
-            # Punto de entrada secundario: comando /start (con o sin deep link)
             CommandHandler('start', start_handler, filters=filters.ChatType.PRIVATE)
         ],
         states={
-            # Estado: Esperando el texto de la consulta/sugerencia
             TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)]
         },
         fallbacks=[
-            # Comandos para salir/cancelar la conversación
             CommandHandler('cancel', cancel_command, filters=filters.ChatType.PRIVATE),
-            # Si envían /start de nuevo en medio, reinicia
-            CommandHandler('start', start_handler, filters=filters.ChatType.PRIVATE),
-            # Captura otros comandos inesperados durante la conversación
-            MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, handle_unexpected_message) # O un mensaje específico de error
+            CommandHandler('start', start_handler, filters=filters.ChatType.PRIVATE), # Reinicia con /start
+             # Captura cualquier otro comando inesperado durante la conversación
+             MessageHandler(filters.COMMAND & filters.ChatType.PRIVATE, cancel_command) # Forzar cancelación si envían otro comando
         ],
-        allow_reentry=True, # Permite reiniciar la conversación con un punto de entrada
-        per_user=True,      # Mantiene estados separados por usuario
-        per_chat=True,      # Asegura que funcione en el chat privado correcto
+        allow_reentry=True,
+        per_user=True,
+        per_chat=True,
         name="consulta_sugerencia_conv",
-        # persistent=False # No necesitas persistencia si user_data se limpia bien
+        # persistent=True # Necesitaría configurar persistence en ApplicationBuilder
     )
 
     # --- Añade los Handlers a la aplicación ---
-    # 1. El manejador de conversación (el más importante)
-    application.add_handler(conv_handler)
+    application.add_handler(conv_handler, group=0) # Dar prioridad al ConversationHandler
 
-    # 2. Comandos de administración (ejecutables en privado)
+    # Comandos de administración (ejecutables en privado)
     application.add_handler(CommandHandler("postpaneles", post_panels_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("documentacion", documentacion_command, filters=filters.ChatType.PRIVATE))
 
-    # 3. Manejador para mensajes de texto inesperados (fuera de conversación, en privado)
-    #    Asegúrate que se ejecute DESPUÉS de conv_handler para no interferir
+    # Manejador para mensajes de texto inesperados (fuera de conversación, en privado)
+    # Se ejecuta si conv_handler no está activo o el mensaje no coincide con sus estados/filtros
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_unexpected_message), group=1)
 
     # --- Inicia el Bot ---
     logger.info("--- Iniciando Polling del Bot ---")
     try:
-        # Corre el bot hasta que se presione Ctrl+C
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.critical(f"--- ERROR CRÍTICO DURANTE EL POLLING ---: {e}", exc_info=True)
@@ -491,4 +515,7 @@ def main() -> None:
         logger.info("--- Bot Detenido ---")
 
 if __name__ == '__main__':
+    # Establecer nivel de log DEBUG para pruebas locales si es necesario
+    # logging.getLogger().setLevel(logging.DEBUG)
+    # logging.getLogger("__main__").setLevel(logging.DEBUG)
     main()
