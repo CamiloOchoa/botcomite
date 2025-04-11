@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 import os
 import logging
-import pickle # Necesario para PicklePersistence
-from pathlib import Path # Para manejar rutas de archivo
+import pickle
+from pathlib import Path
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -14,7 +14,7 @@ from telegram.ext import (
     ConversationHandler,
     filters,
     ContextTypes,
-    PicklePersistence # Importar PicklePersistence
+    PicklePersistence
 )
 from telegram.constants import ParseMode, ChatAction
 from telegram.error import TelegramError
@@ -24,8 +24,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
-# Habilitar logs de DEBUG para Persistence y ConversationHandler puede ser útil
-# logging.getLogger("telegram.ext.Persistence").setLevel(logging.DEBUG)
+# Habilitar DEBUG logs puede ser útil si esto no funciona
 # logging.getLogger("telegram.ext.ConversationHandler").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -33,6 +32,7 @@ logger = logging.getLogger(__name__)
 TYPING_REPLY = 0
 
 # --- Variables Globales ---
+# (Las variables de ID no se usarán en esta versión de prueba, pero las dejamos)
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 GRUPO_ID = int(os.environ.get("GROUP_ID", "0"))
 TEMA_ID_PANEL_CONSULTAS = int(os.environ.get("TEMA_BOTON_CONSULTAS_COMITE", "0"))
@@ -41,14 +41,11 @@ GRUPO_EXTERNO_ID = int(os.environ.get("GRUPO_EXTERNO_ID", "0"))
 TEMA_ID_CONSULTAS_EXTERNO = int(os.environ.get("TEMA_CONSULTAS_EXTERNO", "0"))
 TEMA_ID_SUGERENCIAS_EXTERNO = int(os.environ.get("TEMA_SUGERENCIAS_EXTERNO", "0"))
 TEMA_ID_DOCUMENTACION = int(os.environ.get("TEMA_DOCUMENTACION", "0"))
-MIN_MSG_LENGTH = 15
-
-# --- Nombre del archivo de persistencia ---
-# Usar una ruta relativa simple suele funcionar en Railway
+MIN_MSG_LENGTH = 15 # No se usará en esta prueba
 PERSISTENCE_FILE = "bot_persistence.pkl"
 
 # --- Validación de Variables ---
-# (Sin cambios en esta función - la omito por brevedad, pero está en el código completo)
+# (Sin cambios - omitida por brevedad)
 def validar_variables():
     valid = True
     if not TOKEN:
@@ -83,11 +80,7 @@ def validar_variables():
     return valid
 
 # --- Funciones de Comandos y Callbacks ---
-# (Sin cambios en post_action_panels, post_panels_command, documentacion_command,
-#  callback_iniciar, start_handler, receive_text, handle_unexpected_message,
-#  cancel_command - las omito por brevedad, pero están en el código completo.
-#  IMPORTANTE: Usar las versiones con logging detallado de la respuesta anterior.)
-
+# (post_action_panels, post_panels_command, documentacion_command SIN CAMBIOS - omitidas)
 # --- Función para enviar/actualizar los paneles de acción en el grupo interno ---
 async def post_action_panels(context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Envía o actualiza los mensajes con botones de acción en los temas designados."""
@@ -193,6 +186,8 @@ async def documentacion_command(update: Update, context: ContextTypes.DEFAULT_TY
         logger.error(f"Excepción inesperada enviando Documentación: {e}", exc_info=True)
         await update.message.reply_text("❌ Ocurrió un error inesperado al enviar la documentación.")
 
+
+# (callback_iniciar, start_handler SIN CAMBIOS - omitidas)
 # --- Callback Handler para iniciar el flujo en privado (desde botones del grupo) ---
 async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Manejador para los botones 'iniciar_consulta' e 'iniciar_sugerencia'."""
@@ -200,14 +195,8 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user = query.from_user
     data = query.data
 
-    # IMPORTANTE: No limpiar user_data aquí si usamos persistencia y queremos
-    # permitir que una conversación se reanude si el bot reinicia.
-    # Sin embargo, para *este* flujo donde cada botón inicia algo nuevo,
-    # limpiar al principio sigue siendo lo más lógico para evitar estados viejos.
-    # Si el bot reinicia *después* de esto pero *antes* de recibir respuesta,
-    # la persistencia cargará el estado que SÍ guardamos.
     context.user_data.clear()
-    await query.answer() # Responder al callback lo antes posible
+    await query.answer()
     logger.debug(f"User {user.id} started conversation via callback '{data}'. Cleared user_data first.")
 
     try:
@@ -229,7 +218,6 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
         else:
             logger.warning(f"CallbackQuery con data inesperado recibido de user {user.id}: {data}")
-            # Limpiar por si acaso se guardó algo antes
             context.user_data.clear()
             await context.bot.send_message(chat_id=user.id, text="Acción no reconocida.")
             return ConversationHandler.END
@@ -237,7 +225,6 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await context.bot.send_message(chat_id=user.id, text=prompt, parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Prompt for '{action_text}' sent to user {user.id}. Entering TYPING_REPLY state.")
         logger.debug(f"User {user.id} user_data set to: {context.user_data}. State should be saved by persistence.")
-        # La persistencia guarda el estado automáticamente al final del handler
         return TYPING_REPLY
 
     except TelegramError as e:
@@ -250,12 +237,12 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         else:
             logger.error(f"TelegramError initiating conversation with {user.id} for action '{data}': {e}", exc_info=True)
             await query.answer("❌ Ocurrió un error técnico al iniciar.", show_alert=True)
-        context.user_data.clear() # Limpiar si hubo error
+        context.user_data.clear()
         return ConversationHandler.END
     except Exception as e:
         logger.error(f"Unexpected exception in callback_iniciar for user {user.id}, data '{data}': {e}", exc_info=True)
         await query.answer("❌ Ocurrió un error inesperado.", show_alert=True)
-        context.user_data.clear() # Limpiar si hubo error
+        context.user_data.clear()
         return ConversationHandler.END
 
 
@@ -272,7 +259,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     logger.info(f"/start received from {user.id} ({user.full_name}) with args: {args}")
     if context.user_data:
         logger.debug(f"Clearing existing user_data for {user.id} on /start: {context.user_data}")
-    context.user_data.clear() # /start siempre limpia el estado previo
+    context.user_data.clear()
 
     if args:
         payload = args[0]
@@ -314,105 +301,30 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         logger.info(f"Standard /start processed for user {user.id}.")
         return ConversationHandler.END
 
-# --- Handler para recibir el texto del usuario (dentro de la conversación) ---
-async def receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe el mensaje de consulta/sugerencia del usuario y lo reenvía."""
+# --- Handler de Diagnóstico para TYPING_REPLY ---
+async def diagnostic_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handler de diagnóstico para el estado TYPING_REPLY."""
     user = update.effective_user
-    message = update.message
+    message_text = update.message.text if update.message else "N/A"
 
-    # Con persistencia, user_data debería cargarse automáticamente si el bot reinició
-    logger.info(f"Received message from user {user.id} potentially in TYPING_REPLY state.")
-    # LOG CRÍTICO: Verificar qué contiene user_data AHORA.
-    logger.debug(f"Current user_data for {user.id} upon receiving message (persistence active): {context.user_data}")
+    # LOG CRÍTICO: Verificar user_data INMEDIATAMENTE
+    logger.info(f"DIAGNOSTIC HANDLER: Message received from user {user.id}.")
+    logger.info(f"DIAGNOSTIC HANDLER: Current user_data: {context.user_data}")
 
-    if not message or not message.text:
-        logger.warning(f"Empty/non-text message from {user.id}. Ending conversation.")
-        context.user_data.clear()
-        return ConversationHandler.END
+    action_type = context.user_data.get('action_type')
 
-    user_text = message.text.strip()
-    action_type = context.user_data.get('action_type') # Usar .get() es más seguro
+    if action_type:
+        logger.info(f"DIAGNOSTIC HANDLER: 'action_type' FOUND in user_data: '{action_type}'. Conversation state seems OK.")
+        await update.message.reply_text(f"✅ Diagnóstico: Recibido en estado correcto. Tipo: {action_type}. Mensaje: '{message_text[:30]}...' (Conversación terminada para prueba)")
+    else:
+        logger.error(f"DIAGNOSTIC HANDLER: 'action_type' NOT FOUND in user_data for user {user.id}! State was lost.")
+        await update.message.reply_text("❌ Diagnóstico: Recibido pero el estado ('action_type') se perdió. (Conversación terminada)")
 
-    if not action_type:
-        logger.warning(f"RECEIVE_TEXT: 'action_type' is MISSING for user {user.id} despite being in TYPING_REPLY statehandler! User data: {context.user_data}. Message: '{user_text[:50]}...'. Falling back to unexpected message.")
-        await handle_unexpected_message(update, context, called_from_receive_text=True)
-        context.user_data.clear()
-        return ConversationHandler.END
-
-    # --- Comprobación de longitud ---
-    if len(user_text) < MIN_MSG_LENGTH:
-        logger.info(f"{action_type.capitalize()} from {user.id} is too short ({len(user_text)} chars). Replying and ending conversation.")
-        error_text = (
-            f"⚠️ Tu {action_type} parece demasiado corta (mínimo {MIN_MSG_LENGTH} caracteres).\n"
-            f"El mensaje *no* ha sido enviado.\n\n"
-            f"Si fue un error, por favor, inicia el proceso de nuevo desde el botón en el grupo del Comité."
-        )
-        try:
-            await update.message.reply_text(error_text, parse_mode=ParseMode.MARKDOWN)
-        except TelegramError as reply_err:
-            logger.error(f"Failed to send 'too short' message to user {user.id}: {reply_err}")
-        context.user_data.clear() # Limpiar estado después de validar
-        return ConversationHandler.END
-
-    # --- Preparación para enviar al grupo externo ---
-    logger.info(f"Message from {user.id} passed length check for {action_type}. Preparing to forward.")
-    # ... (resto del código de preparación y envío igual que antes) ...
-    target_chat_id = GRUPO_EXTERNO_ID
-    if action_type == "consulta":
-        target_thread_id = TEMA_ID_CONSULTAS_EXTERNO
-        action_emoji = "🙋‍♂️"
-    elif action_type == "sugerencia":
-        target_thread_id = TEMA_ID_SUGERENCIAS_EXTERNO
-        action_emoji = "💡"
-    else: # Esto no debería ocurrir
-        logger.error(f"Internal logic error: Unknown action_type '{action_type}' in receive_text for user {user.id}.")
-        try:
-            await update.message.reply_text("❌ Hubo un error interno inesperado (código: RT_UNK_AT). Por favor, contacta a un administrador.")
-        except TelegramError as reply_err:
-            logger.error(f"Failed to send internal error message to user {user.id}: {reply_err}")
-        context.user_data.clear()
-        return ConversationHandler.END
-
-    # Construir mensaje a reenviar (usando MarkdownV2 y escapado)
-    user_mention = user.mention_markdown_v2() if user.username else user.full_name.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!')
-    fwd_msg_header = f"{action_emoji} *Nueva {action_type.capitalize()} de {user_mention}* `(ID: {user.id})`:\n{'-'*20}\n"
-    escaped_body = user_text.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace(']', '\\]').replace('(', '\\(').replace(')', '\\)').replace('~', '\\~').replace('`', '\\`').replace('>', '\\>').replace('#', '\\#').replace('+', '\\+').replace('-', '\\-').replace('=', '\\=').replace('|', '\\|').replace('{', '\\{').replace('}', '\\}').replace('.', '\\.').replace('!', '\\!')
-    fwd_msg = fwd_msg_header + escaped_body
-
-    logger.info(f"Attempting to send {action_type} from user {user.id} to external group G:{target_chat_id} T:{target_thread_id}")
-    logger.debug(f"Target Chat ID: {target_chat_id}, Target Thread ID: {target_thread_id}, Parse Mode: {ParseMode.MARKDOWN_V2}")
-
-    message_sent_to_group = False
-    try:
-        await context.bot.send_message(
-            chat_id=target_chat_id,
-            message_thread_id=target_thread_id,
-            text=fwd_msg,
-            parse_mode=ParseMode.MARKDOWN_V2
-        )
-        message_sent_to_group = True
-        logger.info(f"✅ Successfully sent {action_type} from {user.id} to G:{target_chat_id} T:{target_thread_id}.")
-        await update.message.reply_text(f"✅ ¡Tu {action_type} ha sido enviada correctamente! Gracias por tu aportación.")
-
-    except TelegramError as e:
-        logger.error(f"TelegramError sending {action_type} from {user.id} to G:{target_chat_id} T:{target_thread_id}. Error: {e}", exc_info=True)
-        try:
-            await update.message.reply_text(f"❌ Hubo un problema técnico al enviar tu {action_type} (Error: TG-{e.__class__.__name__}). Por favor, inténtalo de nuevo más tarde o contacta a un administrador.")
-        except TelegramError as reply_err:
-            logger.error(f"Failed to send TelegramError feedback message to user {user.id}: {reply_err}")
-
-    except Exception as e:
-        logger.error(f"Unexpected Exception sending {action_type} from {user.id} to G:{target_chat_id} T:{target_thread_id}. Error: {e}", exc_info=True)
-        try:
-            await update.message.reply_text(f"❌ Ocurrió un error inesperado al procesar tu {action_type} (Error: EXC-{e.__class__.__name__}). Por favor, contacta a un administrador.")
-        except TelegramError as reply_err:
-             logger.error(f"Failed to send Exception feedback message to user {user.id}: {reply_err}")
-
-    # Limpiar user_data explícitamente al final de una conversación exitosa o fallida
-    logger.debug(f"Clearing user_data for {user.id} after processing {action_type} (sent to group: {message_sent_to_group}). Ending conversation.")
+    # Terminar la conversación después del diagnóstico
     context.user_data.clear()
     return ConversationHandler.END
 
+# (handle_unexpected_message, cancel_command SIN CAMBIOS - omitidas)
 # --- Handler para mensajes fuera de flujo (en chat privado) ---
 async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAULT_TYPE, called_from_receive_text: bool = False) -> None:
     """Maneja mensajes de texto enviados al bot en privado fuera de una conversación activa."""
@@ -422,7 +334,6 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
     if not chat or chat.type != 'private' or not update.message or not update.message.text or update.message.text.startswith('/'):
         return
 
-    # Evitar doble log si viene de receive_text
     if not called_from_receive_text:
         logger.info(f"Unexpected text message received from {user.id} in private chat (handler group 1 triggered): '{update.message.text[:50]}...'")
 
@@ -446,7 +357,6 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
          return ConversationHandler.END
 
     logger.info(f"User {user.id} ({user.full_name}) executed /cancel.")
-    # Verificar si realmente había datos que cancelar
     if context.user_data:
         logger.debug(f"Cancelling conversation for user {user.id}. Previous user_data: {context.user_data}")
         context.user_data.clear()
@@ -456,7 +366,6 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     return ConversationHandler.END
 
-
 # --- Función Principal ---
 def main() -> None:
     """Inicia el bot."""
@@ -464,32 +373,27 @@ def main() -> None:
         logger.critical("--- BOT DETENIDO: Errores críticos en la configuración ---")
         return
 
-    # --- Configurar la Persistencia ---
     try:
-        # Crear el objeto de persistencia
         persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
         logger.info(f"Usando PicklePersistence con archivo: {PERSISTENCE_FILE}")
     except Exception as e:
         logger.error(f"Error al inicializar PicklePersistence: {e}", exc_info=True)
-        logger.critical("No se pudo inicializar la persistencia. El estado de la conversación no se guardará.")
-        persistence = None # Continuar sin persistencia si falla
+        persistence = None
 
-    # --- Construir la Aplicación con Persistencia ---
     application_builder = ApplicationBuilder().token(TOKEN)
     if persistence:
         application_builder = application_builder.persistence(persistence)
-
     application = application_builder.build()
 
-    # --- Definir el manejador de conversación ---
-    # IMPORTANTE: Añadir `persistent=True` al ConversationHandler
+    # --- Define el manejador de conversación ---
     conv_handler = ConversationHandler(
         entry_points=[
             CallbackQueryHandler(callback_iniciar, pattern="^iniciar_(consulta|sugerencia)$"),
             CommandHandler('start', start_handler, filters=filters.ChatType.PRIVATE)
         ],
         states={
-            TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, receive_text)]
+            # *** USAR EL HANDLER DE DIAGNÓSTICO ***
+            TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, diagnostic_receive_text)]
         },
         fallbacks=[
             CommandHandler('cancel', cancel_command, filters=filters.ChatType.PRIVATE),
@@ -498,31 +402,25 @@ def main() -> None:
         ],
         allow_reentry=True,
         per_user=True,
-        per_chat=True, # Necesario para que la clave de persistencia sea correcta
+        per_chat=True,
         name="consulta_sugerencia_conv",
-        persistent=True, # <--- Habilitar la persistencia para este handler
-        # Opcional: Definir dónde guardar los datos de conversación dentro del archivo pkl
-        # conversation_timeout=... # Considerar añadir timeout si se desea
+        persistent=True,
     )
 
-    # --- Añadir los Handlers a la aplicación ---
+    # --- Añadir Handlers ---
     application.add_handler(conv_handler, group=0)
     application.add_handler(CommandHandler("postpaneles", post_panels_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("documentacion", documentacion_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_unexpected_message), group=1)
 
     # --- Inicia el Bot ---
-    logger.info("--- Iniciando Polling del Bot (con persistencia configurada) ---")
+    logger.info("--- Iniciando Polling del Bot (VERSIÓN DE DIAGNÓSTICO) ---")
     try:
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
         logger.critical(f"--- ERROR CRÍTICO DURANTE EL POLLING ---: {e}", exc_info=True)
     finally:
         logger.info("--- Bot Detenido ---")
-        # Opcional: Forzar guardado de persistencia al salir limpiamente
-        # if persistence:
-        #     await application.update_persistence()
-
 
 if __name__ == '__main__':
     main()
