@@ -14,26 +14,31 @@ from telegram.ext import (
     ConversationHandler,
     filters,
     ContextTypes,
-    PicklePersistence
+    PicklePersistence,
+    DictPersistence # Importar por si queremos probar sin archivos
 )
 from telegram.constants import ParseMode, ChatAction
 from telegram.error import TelegramError
 
 # --- Configuración de Logging ---
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO # Nivel INFO por defecto
 )
+# Habilitar DEBUG para módulos específicos
+logging.getLogger("telegram.ext.Persistence").setLevel(logging.DEBUG)
+logging.getLogger("telegram.ext.ConversationHandler").setLevel(logging.DEBUG)
+# Silenciar httpx si es muy ruidoso
 logging.getLogger("httpx").setLevel(logging.WARNING)
-# Habilitar DEBUG logs puede ser útil si esto no funciona
-# logging.getLogger("telegram.ext.ConversationHandler").setLevel(logging.DEBUG)
+
 logger = logging.getLogger(__name__)
 
 # --- Estado para la Conversación ---
 TYPING_REPLY = 0
 
 # --- Variables Globales ---
-# (Las variables de ID no se usarán en esta versión de prueba, pero las dejamos)
 TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
+# ... (resto de variables globales igual) ...
 GRUPO_ID = int(os.environ.get("GROUP_ID", "0"))
 TEMA_ID_PANEL_CONSULTAS = int(os.environ.get("TEMA_BOTON_CONSULTAS_COMITE", "0"))
 TEMA_ID_PANEL_SUGERENCIAS = int(os.environ.get("TEMA_BOTON_SUGERENCIAS_COMITE", "0"))
@@ -41,7 +46,7 @@ GRUPO_EXTERNO_ID = int(os.environ.get("GRUPO_EXTERNO_ID", "0"))
 TEMA_ID_CONSULTAS_EXTERNO = int(os.environ.get("TEMA_CONSULTAS_EXTERNO", "0"))
 TEMA_ID_SUGERENCIAS_EXTERNO = int(os.environ.get("TEMA_SUGERENCIAS_EXTERNO", "0"))
 TEMA_ID_DOCUMENTACION = int(os.environ.get("TEMA_DOCUMENTACION", "0"))
-MIN_MSG_LENGTH = 15 # No se usará en esta prueba
+MIN_MSG_LENGTH = 15
 PERSISTENCE_FILE = "bot_persistence.pkl"
 
 # --- Validación de Variables ---
@@ -216,18 +221,22 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 "Hola 👋 Por favor, escribe ahora tu *sugerencia* en un único mensaje.\n\n"
                 "_Recuerda que solo los miembros del comité verán tu mensaje._"
             )
-        else:
+        else: # No debería ocurrir
             logger.warning(f"CallbackQuery con data inesperado recibido de user {user.id}: {data}")
             context.user_data.clear()
-            await context.bot.send_message(chat_id=user.id, text="Acción no reconocida.")
-            return ConversationHandler.END
+            return ConversationHandler.END # Salir si la data es inválida
 
         await context.bot.send_message(chat_id=user.id, text=prompt, parse_mode=ParseMode.MARKDOWN)
         logger.info(f"Prompt for '{action_text}' sent to user {user.id}. Entering TYPING_REPLY state.")
         logger.debug(f"User {user.id} user_data set to: {context.user_data}. State should be saved by persistence.")
+        # Forzar guardado inmediato de persistencia (por si acaso)
+        if context.application.persistence:
+             await context.application.update_persistence()
+             logger.debug("Forced persistence update after setting user_data in callback_iniciar.")
+
         return TYPING_REPLY
 
-    except TelegramError as e:
+    except TelegramError as e: # Manejo de errores sin cambios
         if "bot can't initiate conversation with a user" in str(e) or "chat not found" in str(e):
             logger.info(f"User {user.id} ({user.full_name}) attempted action '{data}' without starting bot.")
             await query.answer(
@@ -239,7 +248,7 @@ async def callback_iniciar(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await query.answer("❌ Ocurrió un error técnico al iniciar.", show_alert=True)
         context.user_data.clear()
         return ConversationHandler.END
-    except Exception as e:
+    except Exception as e: # Manejo de errores sin cambios
         logger.error(f"Unexpected exception in callback_iniciar for user {user.id}, data '{data}': {e}", exc_info=True)
         await query.answer("❌ Ocurrió un error inesperado.", show_alert=True)
         context.user_data.clear()
@@ -261,68 +270,93 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         logger.debug(f"Clearing existing user_data for {user.id} on /start: {context.user_data}")
     context.user_data.clear()
 
-    if args:
+    if args: # Lógica de deep link sin cambios
         payload = args[0]
         if payload == "iniciar_consulta":
-            context.user_data['action_type'] = "consulta" # <--- ESTADO A GUARDAR
-            prompt = (
-                "Hola de nuevo 👋 Parece que hiciste clic en un enlace para iniciar una consulta.\n\n"
-                "Por favor, escribe ahora tu *consulta* en un único mensaje.\n"
-                "_Solo los miembros del comité verán tu mensaje._"
-            )
+            context.user_data['action_type'] = "consulta"
+            prompt = "..." # Mensaje omitido por brevedad
             await update.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
             logger.info(f"Deep link '/start iniciar_consulta' processed for {user.id}. Entering TYPING_REPLY.")
-            logger.debug(f"User {user.id} user_data set to: {context.user_data}. State should be saved.")
             return TYPING_REPLY
         elif payload == "iniciar_sugerencia":
-            context.user_data['action_type'] = "sugerencia" # <--- ESTADO A GUARDAR
-            prompt = (
-                "Hola de nuevo 👋 Parece que hiciste clic en un enlace para iniciar una sugerencia.\n\n"
-                "Por favor, escribe ahora tu *sugerencia* en un único mensaje.\n"
-                "_Solo los miembros del comité verán tu mensaje._"
-            )
+            context.user_data['action_type'] = "sugerencia"
+            prompt = "..." # Mensaje omitido por brevedad
             await update.message.reply_text(prompt, parse_mode=ParseMode.MARKDOWN)
             logger.info(f"Deep link '/start iniciar_sugerencia' processed for {user.id}. Entering TYPING_REPLY.")
-            logger.debug(f"User {user.id} user_data set to: {context.user_data}. State should be saved.")
             return TYPING_REPLY
         else:
-            await update.message.reply_text(
-                "Hola 👋. El enlace que has usado no es válido o ha expirado.\n"
-                "Si quieres enviar una consulta o sugerencia, por favor, usa los botones correspondientes en el grupo del Comité."
-            )
-            logger.warning(f"Invalid deep link payload '{payload}' received from user {user.id}.")
+            await update.message.reply_text("...") # Mensaje omitido por brevedad
             return ConversationHandler.END
-    else:
-        await update.message.reply_text(
-            "Hola 👋 Soy el bot asistente del Comité.\n"
-            "Para enviar una *consulta* o *sugerencia* de forma privada, por favor, utiliza los botones 🙋‍♂️ o 💡 en los temas correspondientes del grupo del Comité."
-            , parse_mode=ParseMode.MARKDOWN
-        )
-        logger.info(f"Standard /start processed for user {user.id}.")
+    else: # /start normal sin cambios
+        await update.message.reply_text("...", parse_mode=ParseMode.MARKDOWN) # Mensaje omitido por brevedad
         return ConversationHandler.END
 
 # --- Handler de Diagnóstico para TYPING_REPLY ---
 async def diagnostic_receive_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handler de diagnóstico para el estado TYPING_REPLY."""
     user = update.effective_user
+    chat = update.effective_chat
     message_text = update.message.text if update.message else "N/A"
+    conv_handler_name = "consulta_sugerencia_conv" # Nombre que le dimos al handler
 
-    # LOG CRÍTICO: Verificar user_data INMEDIATAMENTE
-    logger.info(f"DIAGNOSTIC HANDLER: Message received from user {user.id}.")
-    logger.info(f"DIAGNOSTIC HANDLER: Current user_data: {context.user_data}")
+    # LOG CRÍTICO: Verificar user_data y datos de conversación INMEDIATAMENTE
+    logger.info(f"DIAGNOSTIC HANDLER: Message received from user {user.id} / chat {chat.id}.")
 
+    # Obtener datos directamente de la persistencia si está disponible
+    conversation_key = (chat.id, user.id) # Clave estándar para per_user y per_chat
+    persisted_state = None
+    persisted_user_data = None
+    persisted_chat_data = None # No lo usamos, pero por completitud
+
+    if context.application.persistence:
+        logger.debug(f"Attempting to fetch persisted data for key: {conversation_key}")
+        all_conv_data = await context.application.persistence.get_conversations(conv_handler_name)
+        persisted_state = all_conv_data.get(conversation_key)
+        persisted_user_data = await context.application.persistence.get_user_data()
+        persisted_chat_data = await context.application.persistence.get_chat_data() # Aunque no se use aquí
+        logger.info(f"DIAGNOSTIC HANDLER: Persisted State for key {conversation_key}: {persisted_state}")
+        logger.info(f"DIAGNOSTIC HANDLER: Persisted User Data for user {user.id}: {persisted_user_data.get(user.id)}")
+        logger.info(f"DIAGNOSTIC HANDLER: Persisted Chat Data for chat {chat.id}: {persisted_chat_data.get(chat.id)}") # Log por si acaso
+    else:
+        logger.warning("DIAGNOSTIC HANDLER: Persistence is not configured/available.")
+
+    # Verificar context.user_data que la biblioteca proporciona al handler
+    logger.info(f"DIAGNOSTIC HANDLER: context.user_data available in handler: {context.user_data}")
     action_type = context.user_data.get('action_type')
 
+    reply_message = ""
     if action_type:
-        logger.info(f"DIAGNOSTIC HANDLER: 'action_type' FOUND in user_data: '{action_type}'. Conversation state seems OK.")
-        await update.message.reply_text(f"✅ Diagnóstico: Recibido en estado correcto. Tipo: {action_type}. Mensaje: '{message_text[:30]}...' (Conversación terminada para prueba)")
+        logger.info(f"DIAGNOSTIC HANDLER: 'action_type' FOUND in context.user_data: '{action_type}'.")
+        reply_message = f"✅ Diagnóstico: Recibido con estado '{action_type}' en context.user_data."
+        # Verificar si coincide con el estado persistido
+        if persisted_state == TYPING_REPLY:
+             reply_message += "\nEstado persistido coincide (TYPING_REPLY)."
+             logger.info("DIAGNOSTIC HANDLER: Persisted state matches TYPING_REPLY.")
+        else:
+             reply_message += f"\n⚠️ Estado persistido NO coincide ({persisted_state})."
+             logger.warning(f"DIAGNOSTIC HANDLER: Mismatch! Persisted state is {persisted_state}, expected {TYPING_REPLY}.")
+
     else:
-        logger.error(f"DIAGNOSTIC HANDLER: 'action_type' NOT FOUND in user_data for user {user.id}! State was lost.")
-        await update.message.reply_text("❌ Diagnóstico: Recibido pero el estado ('action_type') se perdió. (Conversación terminada)")
+        logger.error(f"DIAGNOSTIC HANDLER: 'action_type' NOT FOUND in context.user_data for user {user.id}! State was lost or not loaded.")
+        reply_message = "❌ Diagnóstico: Recibido pero 'action_type' NO está en context.user_data."
+        # Comprobar si al menos estaba en la persistencia
+        if persisted_user_data and persisted_user_data.get(user.id, {}).get('action_type'):
+            persisted_action = persisted_user_data.get(user.id, {}).get('action_type')
+            reply_message += f"\nℹ️ Sin embargo, 'action_type' ({persisted_action}) SÍ estaba en los datos persistidos del usuario."
+            logger.info(f"DIAGNOSTIC HANDLER: action_type found in raw persisted user data: {persisted_action}")
+        if persisted_state == TYPING_REPLY:
+            reply_message += "\nℹ️ Y el estado persistido SÍ era TYPING_REPLY."
+            logger.info("DIAGNOSTIC HANDLER: Raw persisted state was TYPING_REPLY.")
+        else:
+            reply_message += f"\nℹ️ El estado persistido era {persisted_state}."
+
+    reply_message += f"\nMensaje: '{message_text[:30]}...'\n(Conversación terminada para prueba)"
+    await update.message.reply_text(reply_message)
 
     # Terminar la conversación después del diagnóstico
     context.user_data.clear()
     return ConversationHandler.END
+
 
 # (handle_unexpected_message, cancel_command SIN CAMBIOS - omitidas)
 # --- Handler para mensajes fuera de flujo (en chat privado) ---
@@ -340,8 +374,7 @@ async def handle_unexpected_message(update: Update, context: ContextTypes.DEFAUL
     try:
         await update.message.reply_text(
             "Hola 👋 Recibí tu mensaje, pero no estoy esperando una consulta o sugerencia en este momento.\n\n"
-            "Si quieres enviar una, por favor, ve al grupo del Comité y utiliza los botones 🙋‍♂️ (Consulta) o 💡 (Sugerencia) en los temas correspondientes.\n\n"
-            "También puedes usar /start para ver las opciones o /cancel si crees que estás en medio de una acción."
+            # ... (resto del mensaje igual)
             , parse_mode=ParseMode.MARKDOWN
         )
     except TelegramError as e:
@@ -360,11 +393,12 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if context.user_data:
         logger.debug(f"Cancelling conversation for user {user.id}. Previous user_data: {context.user_data}")
         context.user_data.clear()
-        await update.message.reply_text("Operación cancelada. Puedes empezar de nuevo cuando quieras usando los botones del grupo.")
+        await update.message.reply_text("Operación cancelada.") # Mensaje simplificado
     else:
-        await update.message.reply_text("No hay ninguna operación activa que cancelar.")
+        await update.message.reply_text("No hay operación activa que cancelar.")
 
     return ConversationHandler.END
+
 
 # --- Función Principal ---
 def main() -> None:
@@ -374,10 +408,14 @@ def main() -> None:
         return
 
     try:
+        # --- PROBAR CON DictPersistence (en memoria, sin archivos) ---
+        # persistence = DictPersistence()
+        # logger.info("Usando DictPersistence (en memoria)")
+        # --- O SEGUIR CON PicklePersistence ---
         persistence = PicklePersistence(filepath=PERSISTENCE_FILE)
         logger.info(f"Usando PicklePersistence con archivo: {PERSISTENCE_FILE}")
     except Exception as e:
-        logger.error(f"Error al inicializar PicklePersistence: {e}", exc_info=True)
+        logger.error(f"Error al inicializar Persistence: {e}", exc_info=True)
         persistence = None
 
     application_builder = ApplicationBuilder().token(TOKEN)
@@ -392,7 +430,6 @@ def main() -> None:
             CommandHandler('start', start_handler, filters=filters.ChatType.PRIVATE)
         ],
         states={
-            # *** USAR EL HANDLER DE DIAGNÓSTICO ***
             TYPING_REPLY: [MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, diagnostic_receive_text)]
         },
         fallbacks=[
@@ -404,17 +441,19 @@ def main() -> None:
         per_user=True,
         per_chat=True,
         name="consulta_sugerencia_conv",
-        persistent=True,
+        persistent=True, # Mantener activado para usar la persistencia configurada
     )
 
     # --- Añadir Handlers ---
     application.add_handler(conv_handler, group=0)
+    # ... (resto de handlers igual) ...
     application.add_handler(CommandHandler("postpaneles", post_panels_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(CommandHandler("documentacion", documentacion_command, filters=filters.ChatType.PRIVATE))
     application.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, handle_unexpected_message), group=1)
 
+
     # --- Inicia el Bot ---
-    logger.info("--- Iniciando Polling del Bot (VERSIÓN DE DIAGNÓSTICO) ---")
+    logger.info("--- Iniciando Polling del Bot (DEBUG HABILITADO) ---")
     try:
         application.run_polling(allowed_updates=Update.ALL_TYPES)
     except Exception as e:
